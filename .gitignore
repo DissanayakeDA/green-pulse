@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+
+# ESP32 Wi-Fi password and AWS IoT certificates
+firmware/**/config.h
+backend/certs/

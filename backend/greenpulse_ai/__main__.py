@@ -20,7 +20,7 @@ import time
 from .agents import DummyNotificationAgent, DummyWeatherAgent
 from .config import Settings
 from .dummy_data import DEFAULT_SCENARIO, SCENARIOS, Scenario, simulate_readings
-from .llm import create_chat_model
+from .llm import PROVIDER_API_KEYS, create_chat_model
 from .mqtt_payloads import LED_COLOURS, Topics, build_messages
 from .orchestrator import build_pipeline, build_service
 from .plant_profiles import PROFILES, get_profile
@@ -51,7 +51,11 @@ def main(argv: list[str] | None = None) -> None:
         settings = dataclasses.replace(settings, plant_profile=args.plant)
 
     llm = create_chat_model(settings)
-    mode = f"LLM ({settings.llm_model})" if llm else "rules only (offline; set OPENAI_API_KEY in .env to use the LLM)"
+    if llm:
+        mode = f"LLM ({settings.llm_model})"
+    else:
+        key_var = PROVIDER_API_KEYS.get(settings.llm_model.split(":", 1)[0], "the API key")
+        mode = f"rules only (offline; set {key_var} in .env to use {settings.llm_model})"
     print(f"GreenPulse Agentic AI Core | plant: {get_profile(settings.plant_profile).name} | mode: {mode}\n")
 
     if args.simulate:

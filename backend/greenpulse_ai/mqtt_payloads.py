@@ -9,6 +9,7 @@ import json
 from dataclasses import dataclass
 
 from .schemas import CareResult, SensorReading, priority_code
+from .watering import WateringDecision
 
 LED_COLOURS = {"low": "green", "medium": "yellow", "high": "orange", "critical": "red"}
 
@@ -17,17 +18,34 @@ LED_COLOURS = {"low": "green", "medium": "yellow", "high": "orange", "critical":
 class Topics:
     prefix: str = "greenpulse"
 
-    def sensors(self, device_id: str) -> str:  # ESP32 -> backend
+    def sensors(self, device_id: str) -> str:  # ESP32 -> backend, Node-RED
         return f"{self.prefix}/{device_id}/sensors"
+
+    def status(self, device_id: str) -> str:  # ESP32 -> Node-RED: online/offline (retained, last will)
+        return f"{self.prefix}/{device_id}/status"
 
     def ai_input(self, device_id: str) -> str:  # backend -> Node-RED: what the Plant Doctor was given
         return f"{self.prefix}/{device_id}/ai/input"
 
-    def care(self, device_id: str) -> str:  # backend -> Node-RED: the Plant Doctor's advice
+    def care(self, device_id: str) -> str:  # backend -> Node-RED: the Plant Doctor's advice (retained)
         return f"{self.prefix}/{device_id}/ai/care"
 
-    def priority(self, device_id: str) -> str:  # backend -> ESP32: RGB LED only (publish retained)
+    def priority(self, device_id: str) -> str:  # backend -> ESP32: RGB LED only (retained)
         return f"{self.prefix}/{device_id}/priority"
+
+    # Never retain pump commands: the ESP32 would re-run a stale command every time it reconnects.
+    def pump_command(self, device_id: str) -> str:  # backend (auto) or Node-RED (manual) -> ESP32
+        return f"{self.prefix}/{device_id}/pump/command"
+
+    def pump_state(self, device_id: str) -> str:  # ESP32 -> backend, Node-RED: on / off / rejected
+        return f"{self.prefix}/{device_id}/pump/state"
+
+    def pump_auto(self, device_id: str) -> str:  # Node-RED switch -> backend: auto-watering on/off (retained)
+        return f"{self.prefix}/{device_id}/pump/auto"
+
+    def retained(self, device_id: str) -> set[str]:
+        """Backend topics published with the retain flag, so late subscribers get the current value."""
+        return {self.care(device_id), self.priority(device_id)}
 
 
 def parse_sensor_payload(payload: bytes | str, device_id: str | None = None) -> SensorReading:
@@ -38,8 +56,11 @@ def parse_sensor_payload(payload: bytes | str, device_id: str | None = None) -> 
     return SensorReading.model_validate(data)
 
 
-def build_messages(result: CareResult, topics: Topics) -> list[tuple[str, dict]]:
-    """The (topic, JSON payload) pairs to publish after one Plant Doctor run."""
+def build_messages(
+    result: CareResult, topics: Topics, watering: WateringDecision | None = None
+) -> list[tuple[str, dict]]:
+    """The (topic, JSON payload) pairs to publish after one Plant Doctor run. The pump command itself is
+    published separately (WateringDecision.command) and only when the decision is to water."""
     device_id = result.device_id
     timestamp = result.generated_at.isoformat(timespec="seconds")
     priority = result.advice.priority
@@ -69,7 +90,9 @@ def build_messages(result: CareResult, topics: Topics) -> list[tuple[str, dict]]
         "trigger": result.trigger,
         "duration_ms": result.duration_ms,
     }
-    device = {"priority": priority, "priority_code": priority_code(priority), "led": LED_COLOURS[priority]}
+    if watering is not None:
+        care["watering"] = watering.as_payload()
+    device ={"priority": priority, "priority_code": priority_code(priority), "led": LED_COLOURS[priority]}
 
     return [
         (topics.ai_input(device_id), ai_input),
