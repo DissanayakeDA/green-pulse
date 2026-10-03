@@ -1,0 +1,992 @@
+[
+  {
+    "id": "gp_tab",
+    "type": "tab",
+    "label": "GreenPulse",
+    "disabled": false,
+    "info": "GreenPulse dashboard. Set DEVICE_ID on this tab (double-click the tab > Environment variables).\nBroker: double-click any MQTT node > edit the \"GreenPulse broker\" server.",
+    "env": [
+      {
+        "name": "DEVICE_ID",
+        "value": "greenpulse-01",
+        "type": "str"
+      },
+      {
+        "name": "MANUAL_WATER_S",
+        "value": "5",
+        "type": "num"
+      }
+    ]
+  },
+  {
+    "id": "gp_broker",
+    "type": "mqtt-broker",
+    "name": "GreenPulse broker",
+    "broker": "localhost",
+    "port": "1883",
+    "clientid": "greenpulse-nodered",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "gp_ui_base",
+    "type": "ui-base",
+    "name": "GreenPulse",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "default",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true,
+    "allowInstall": false
+  },
+  {
+    "id": "gp_ui_theme",
+    "type": "ui-theme",
+    "name": "GreenPulse",
+    "colors": {
+      "surface": "#2f5d1e",
+      "primary": "#3f7d20",
+      "bgPage": "#f2f5ef",
+      "groupBg": "#ffffff",
+      "groupOutline": "#d5e0cc"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "6px",
+      "widgetGap": "12px"
+    }
+  },
+  {
+    "id": "gp_ui_page",
+    "type": "ui-page",
+    "name": "GreenPulse",
+    "ui": "gp_ui_base",
+    "path": "/greenpulse",
+    "icon": "leaf",
+    "layout": "grid",
+    "theme": "gp_ui_theme",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": "0",
+        "cols": "3"
+      },
+      {
+        "name": "Tablet",
+        "px": "576",
+        "cols": "6"
+      },
+      {
+        "name": "Small Desktop",
+        "px": "768",
+        "cols": "9"
+      },
+      {
+        "name": "Desktop",
+        "px": "1024",
+        "cols": "12"
+      }
+    ],
+    "order": 1,
+    "className": "",
+    "visible": "true",
+    "disabled": "false"
+  },
+  {
+    "id": "gp_g_live",
+    "type": "ui-group",
+    "name": "Live sensors",
+    "page": "gp_ui_page",
+    "width": "6",
+    "height": "1",
+    "order": 1,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gp_g_ai",
+    "type": "ui-group",
+    "name": "Plant Doctor (AI)",
+    "page": "gp_ui_page",
+    "width": "6",
+    "height": "1",
+    "order": 2,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gp_g_hist",
+    "type": "ui-group",
+    "name": "Last 24 hours",
+    "page": "gp_ui_page",
+    "width": "8",
+    "height": "1",
+    "order": 3,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gp_g_water",
+    "type": "ui-group",
+    "name": "Watering",
+    "page": "gp_ui_page",
+    "width": "4",
+    "height": "1",
+    "order": 4,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gp_g_mqtt",
+    "type": "ui-group",
+    "name": "MQTT messages (latest per topic)",
+    "page": "gp_ui_page",
+    "width": "12",
+    "height": "1",
+    "order": 5,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "gp_c1",
+    "type": "comment",
+    "z": "gp_tab",
+    "name": "ESP32 -> live sensors",
+    "info": "Readings published by the ESP32 every SENSOR_INTERVAL_MS.",
+    "x": 150,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "gp_in_sensors",
+    "type": "mqtt in",
+    "z": "gp_tab",
+    "name": "ESP32 sensors",
+    "topic": "greenpulse/+/sensors",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "gp_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 100,
+    "wires": [
+      [
+        "gp_fn_split"
+      ]
+    ]
+  },
+  {
+    "id": "gp_fn_split",
+    "type": "function",
+    "z": "gp_tab",
+    "name": "Split readings",
+    "func": "const p = msg.payload || {};\nconst value = (v, topic) => (typeof v === \"number\" ? { payload: v, topic } : null);\nconst wifi = typeof p.rssi === \"number\" ? ` · Wi-Fi ${p.rssi} dBm` : \"\";\nconst raw = typeof p.soil_raw === \"number\" ? ` · soil raw ${p.soil_raw}` : \"\";\nreturn [\n    value(p.soil_moisture, \"Soil moisture %\"),\n    value(p.temperature, \"Temperature °C\"),\n    value(p.humidity, \"Humidity %\"),\n    { payload: new Date().toLocaleTimeString() + wifi + raw },\n];",
+    "outputs": 4,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 100,
+    "wires": [
+      [
+        "gp_g_soil",
+        "gp_chart"
+      ],
+      [
+        "gp_g_temp",
+        "gp_chart"
+      ],
+      [
+        "gp_g_hum",
+        "gp_chart"
+      ],
+      [
+        "gp_t_last"
+      ]
+    ]
+  },
+  {
+    "id": "gp_g_soil",
+    "type": "ui-gauge",
+    "z": "gp_tab",
+    "name": "",
+    "group": "gp_g_live",
+    "order": 1,
+    "value": "payload",
+    "valueType": "msg",
+    "width": "2",
+    "height": "3",
+    "gtype": "gauge-half",
+    "gstyle": "rounded",
+    "title": "Soil moisture",
+    "alwaysShowTitle": true,
+    "floatingTitlePosition": "top-left",
+    "units": "%",
+    "icon": "",
+    "prefix": "",
+    "suffix": "",
+    "segments": [
+      {
+        "from": "0",
+        "color": "#c62828"
+      },
+      {
+        "from": "25",
+        "color": "#e8710a"
+      },
+      {
+        "from": "35",
+        "color": "#2e7d32"
+      },
+      {
+        "from": "65",
+        "color": "#1e6fb8"
+      }
+    ],
+    "min": 0,
+    "max": 100,
+    "sizeThickness": 16,
+    "sizeGap": 4,
+    "sizeKeyThickness": 8,
+    "styleRounded": true,
+    "styleGlow": false,
+    "className": "",
+    "x": 640,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "gp_g_temp",
+    "type": "ui-gauge",
+    "z": "gp_tab",
+    "name": "",
+    "group": "gp_g_live",
+    "order": 2,
+    "value": "payload",
+    "valueType": "msg",
+    "width": "2",
+    "height": "3",
+    "gtype": "gauge-half",
+    "gstyle": "rounded",
+    "title": "Temperature",
+    "alwaysShowTitle": true,
+    "floatingTitlePosition": "top-left",
+    "units": "°C",
+    "icon": "",
+    "prefix": "",
+    "suffix": "",
+    "segments": [
+      {
+        "from": "0",
+        "color": "#1e6fb8"
+      },
+      {
+        "from": "18",
+        "color": "#2e7d32"
+      },
+      {
+        "from": "32",
+        "color": "#e8710a"
+      },
+      {
+        "from": "36",
+        "color": "#c62828"
+      }
+    ],
+    "min": 0,
+    "max": 50,
+    "sizeThickness": 16,
+    "sizeGap": 4,
+    "sizeKeyThickness": 8,
+    "styleRounded": true,
+    "styleGlow": false,
+    "className": "",
+    "x": 640,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "gp_g_hum",
+    "type": "ui-gauge",
+    "z": "gp_tab",
+    "name": "",
+    "group": "gp_g_live",
+    "order": 3,
+    "value": "payload",
+    "valueType": "msg",
+    "width": "2",
+    "height": "3",
+    "gtype": "gauge-half",
+    "gstyle": "rounded",
+    "title": "Humidity",
+    "alwaysShowTitle": true,
+    "floatingTitlePosition": "top-left",
+    "units": "%",
+    "icon": "",
+    "prefix": "",
+    "suffix": "",
+    "segments": [
+      {
+        "from": "0",
+        "color": "#e8710a"
+      },
+      {
+        "from": "40",
+        "color": "#2e7d32"
+      },
+      {
+        "from": "80",
+        "color": "#1e6fb8"
+      }
+    ],
+    "min": 0,
+    "max": 100,
+    "sizeThickness": 16,
+    "sizeGap": 4,
+    "sizeKeyThickness": 8,
+    "styleRounded": true,
+    "styleGlow": false,
+    "className": "",
+    "x": 640,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "gp_t_last",
+    "type": "ui-text",
+    "z": "gp_tab",
+    "group": "gp_g_live",
+    "order": 5,
+    "width": "6",
+    "height": "1",
+    "name": "",
+    "label": "Last reading",
+    "format": "{{msg.payload}}",
+    "layout": "row-left",
+    "style": false,
+    "font": "",
+    "fontSize": 16,
+    "color": "#717171",
+    "wrapText": true,
+    "className": "",
+    "value": "payload",
+    "valueType": "msg",
+    "x": 640,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "gp_chart",
+    "type": "ui-chart",
+    "z": "gp_tab",
+    "group": "gp_g_hist",
+    "name": "History",
+    "label": "",
+    "order": 1,
+    "chartType": "line",
+    "category": "topic",
+    "categoryType": "msg",
+    "xAxisLabel": "",
+    "xAxisProperty": "",
+    "xAxisPropertyType": "timestamp",
+    "xAxisType": "time",
+    "xAxisFormat": "",
+    "xAxisFormatType": "auto",
+    "xmin": "",
+    "xmax": "",
+    "yAxisLabel": "",
+    "yAxisProperty": "payload",
+    "yAxisPropertyType": "msg",
+    "ymin": "0",
+    "ymax": "100",
+    "bins": 10,
+    "action": "append",
+    "stackSeries": false,
+    "pointShape": "false",
+    "pointRadius": 4,
+    "showLegend": true,
+    "removeOlder": "24",
+    "removeOlderUnit": "3600",
+    "removeOlderPoints": "3000",
+    "colors": [
+      "#2e7d32",
+      "#e8710a",
+      "#1e6fb8",
+      "#A347E1",
+      "#D62728",
+      "#FF9896",
+      "#9467BD",
+      "#C5B0D5",
+      "#8c564b"
+    ],
+    "textColor": [
+      "#666666"
+    ],
+    "textColorDefault": true,
+    "gridColor": [
+      "#e5e5e5"
+    ],
+    "gridColorDefault": true,
+    "width": "8",
+    "height": "6",
+    "className": "",
+    "interpolation": "linear",
+    "x": 630,
+    "y": 220,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "gp_in_status",
+    "type": "mqtt in",
+    "z": "gp_tab",
+    "name": "ESP32 status",
+    "topic": "greenpulse/+/status",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "gp_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 260,
+    "wires": [
+      [
+        "gp_fn_status"
+      ]
+    ]
+  },
+  {
+    "id": "gp_fn_status",
+    "type": "function",
+    "z": "gp_tab",
+    "name": "Online?",
+    "func": "const s = msg.payload || {};\nmsg.payload = s.online ? `Online · ${s.ip || \"\"} · firmware ${s.firmware || \"?\"}` : \"Offline\";\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 260,
+    "wires": [
+      [
+        "gp_t_status"
+      ]
+    ]
+  },
+  {
+    "id": "gp_t_status",
+    "type": "ui-text",
+    "z": "gp_tab",
+    "group": "gp_g_live",
+    "order": 4,
+    "width": "6",
+    "height": "1",
+    "name": "",
+    "label": "ESP32",
+    "format": "{{msg.payload}}",
+    "layout": "row-left",
+    "style": false,
+    "font": "",
+    "fontSize": 16,
+    "color": "#717171",
+    "wrapText": true,
+    "className": "",
+    "value": "payload",
+    "valueType": "msg",
+    "x": 640,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "gp_c2",
+    "type": "comment",
+    "z": "gp_tab",
+    "name": "Backend -> Plant Doctor advice",
+    "info": "Published (retained) by python -m greenpulse_ai.bridge after each analysis.",
+    "x": 170,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "gp_in_care",
+    "type": "mqtt in",
+    "z": "gp_tab",
+    "name": "AI care advice",
+    "topic": "greenpulse/+/ai/care",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "gp_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 400,
+    "wires": [
+      [
+        "gp_tpl_care",
+        "gp_fn_auto_state"
+      ]
+    ]
+  },
+  {
+    "id": "gp_tpl_care",
+    "type": "ui-template",
+    "z": "gp_tab",
+    "group": "gp_g_ai",
+    "page": "",
+    "ui": "",
+    "name": "Care advice card",
+    "order": 1,
+    "width": "0",
+    "height": "0",
+    "head": "",
+    "format": "<template>\n    <div v-if=\"care\" class=\"gp-care\">\n        <div class=\"gp-care-top\">\n            <span class=\"gp-chip\" :style=\"{ background: colour }\">{{ care.priority.toUpperCase() }}</span>\n            <span class=\"gp-headline\">{{ care.headline }}</span>\n        </div>\n        <p class=\"gp-message\">{{ care.message }}</p>\n        <ol class=\"gp-actions\">\n            <li v-for=\"(action, i) in care.actions\" :key=\"i\">{{ action }}</li>\n        </ol>\n        <p class=\"gp-note\"><b>Why:</b> {{ care.reasoning }}</p>\n        <p v-if=\"care.guardrail_note\" class=\"gp-note\"><b>Safety guardrail:</b> {{ care.guardrail_note }}</p>\n        <p v-if=\"care.watering\" class=\"gp-note\"><b>Auto-watering:</b> {{ watering }}</p>\n        <p class=\"gp-meta\">{{ source }} · {{ care.trigger }} · {{ time }} · {{ care.duration_ms }} ms</p>\n    </div>\n    <p v-else class=\"gp-meta\">Waiting for the first Plant Doctor analysis. Is the backend bridge running?</p>\n</template>\n\n<script>\nexport default {\n    computed: {\n        care () {\n            const p = this.msg && this.msg.payload\n            return p && p.headline ? p : null\n        },\n        colour () {\n            return { low: '#2e7d32', medium: '#c79a00', high: '#e8710a', critical: '#c62828' }[this.care.priority] || '#777'\n        },\n        source () {\n            return this.care.model ? `${this.care.source} (${this.care.model})` : this.care.source\n        },\n        time () {\n            return new Date(this.care.timestamp).toLocaleString()\n        },\n        watering () {\n            const w = this.care.watering\n            if (!w.auto_enabled) return 'off'\n            return w.decision === 'water' ? `watering ${w.duration_s} s. ${w.reason}` : `not watering. ${w.reason}`\n        }\n    }\n}\n</script>\n\n<style>\n.gp-care { display: flex; flex-direction: column; gap: 8px; }\n.gp-care-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }\n.gp-chip { color: #fff; font-weight: 700; font-size: 0.8rem; letter-spacing: 0.04em; padding: 3px 10px; border-radius: 999px; }\n.gp-headline { font-size: 1.25rem; font-weight: 600; }\n.gp-message { margin: 0; line-height: 1.45; }\n.gp-actions { margin: 0; padding-left: 1.3em; line-height: 1.5; }\n.gp-note { margin: 0; font-size: 0.9rem; color: #444; }\n.gp-meta { margin: 0; font-size: 0.8rem; color: #777; }\n</style>\n",
+    "storeOutMessages": true,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 640,
+    "y": 400,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "gp_c3",
+    "type": "comment",
+    "z": "gp_tab",
+    "name": "Watering",
+    "info": "Manual buttons publish pump/command (never retained). The switch publishes pump/auto (retained); the backend reads it.",
+    "x": 110,
+    "y": 480,
+    "wires": []
+  },
+  {
+    "id": "gp_sw_auto",
+    "type": "ui-switch",
+    "z": "gp_tab",
+    "name": "Auto-watering",
+    "label": "Auto-watering (AI)",
+    "group": "gp_g_water",
+    "order": 1,
+    "width": "4",
+    "height": "1",
+    "passthru": false,
+    "decouple": false,
+    "topic": "topic",
+    "topicType": "msg",
+    "style": "",
+    "className": "",
+    "layout": "row-spread",
+    "clickableArea": "switch",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "onicon": "",
+    "oncolor": "",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "officon": "",
+    "offcolor": "",
+    "x": 400,
+    "y": 560,
+    "wires": [
+      [
+        "gp_fn_auto_topic"
+      ]
+    ]
+  },
+  {
+    "id": "gp_fn_auto_state",
+    "type": "function",
+    "z": "gp_tab",
+    "name": "Backend auto state",
+    "func": "// Keeps the switch in step with the backend (e.g. when AUTO_WATERING=1 in .env and nobody touched the switch).\nconst w = msg.payload && msg.payload.watering;\nif (!w) return null;\nreturn { payload: w.auto_enabled };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 440,
+    "wires": [
+      [
+        "gp_sw_auto"
+      ]
+    ]
+  },
+  {
+    "id": "gp_in_auto",
+    "type": "mqtt in",
+    "z": "gp_tab",
+    "name": "Auto switch (retained)",
+    "topic": "greenpulse/+/pump/auto",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "gp_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 560,
+    "wires": [
+      [
+        "gp_sw_auto"
+      ]
+    ]
+  },
+  {
+    "id": "gp_fn_auto_topic",
+    "type": "function",
+    "z": "gp_tab",
+    "name": "pump/auto topic",
+    "func": "msg.topic = `greenpulse/${env.get(\"DEVICE_ID\")}/pump/auto`;\nmsg.payload = msg.payload === true;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 610,
+    "y": 560,
+    "wires": [
+      [
+        "gp_out_retained"
+      ]
+    ]
+  },
+  {
+    "id": "gp_out_retained",
+    "type": "mqtt out",
+    "z": "gp_tab",
+    "name": "publish (retained)",
+    "topic": "",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "gp_broker",
+    "x": 840,
+    "y": 560,
+    "wires": []
+  },
+  {
+    "id": "gp_btn_water",
+    "type": "ui-button",
+    "z": "gp_tab",
+    "group": "gp_g_water",
+    "name": "",
+    "label": "Water now",
+    "order": 2,
+    "width": "2",
+    "height": "1",
+    "emulateClick": false,
+    "tooltip": "Run the pump for MANUAL_WATER_S seconds",
+    "color": "",
+    "bgcolor": "",
+    "className": "",
+    "icon": "water",
+    "iconPosition": "left",
+    "payload": "water",
+    "payloadType": "str",
+    "topic": "topic",
+    "topicType": "msg",
+    "buttonColor": "",
+    "textColor": "",
+    "iconColor": "",
+    "enableClick": true,
+    "enablePointerdown": false,
+    "pointerdownPayload": "",
+    "pointerdownPayloadType": "str",
+    "enablePointerup": false,
+    "pointerupPayload": "",
+    "pointerupPayloadType": "str",
+    "x": 390,
+    "y": 620,
+    "wires": [
+      [
+        "gp_fn_pump_cmd"
+      ]
+    ]
+  },
+  {
+    "id": "gp_btn_stop",
+    "type": "ui-button",
+    "z": "gp_tab",
+    "group": "gp_g_water",
+    "name": "",
+    "label": "Stop pump",
+    "order": 3,
+    "width": "2",
+    "height": "1",
+    "emulateClick": false,
+    "tooltip": "",
+    "color": "",
+    "bgcolor": "",
+    "className": "",
+    "icon": "stop",
+    "iconPosition": "left",
+    "payload": "stop",
+    "payloadType": "str",
+    "topic": "topic",
+    "topicType": "msg",
+    "buttonColor": "#c62828",
+    "textColor": "",
+    "iconColor": "",
+    "enableClick": true,
+    "enablePointerdown": false,
+    "pointerdownPayload": "",
+    "pointerdownPayloadType": "str",
+    "enablePointerup": false,
+    "pointerupPayload": "",
+    "pointerupPayloadType": "str",
+    "x": 390,
+    "y": 660,
+    "wires": [
+      [
+        "gp_fn_pump_cmd"
+      ]
+    ]
+  },
+  {
+    "id": "gp_fn_pump_cmd",
+    "type": "function",
+    "z": "gp_tab",
+    "name": "pump/command",
+    "func": "// The ESP32 enforces its own limits (max run time, rest time, wet-soil cut-off) and reports on pump/state.\nmsg.topic = `greenpulse/${env.get(\"DEVICE_ID\")}/pump/command`;\nmsg.payload = msg.payload === \"stop\"\n    ? { action: \"off\", source: \"manual\" }\n    : { action: \"on\", duration_s: Number(env.get(\"MANUAL_WATER_S\")) || 5, source: \"manual\", reason: \"Dashboard button\" };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 610,
+    "y": 640,
+    "wires": [
+      [
+        "gp_out_cmd"
+      ]
+    ]
+  },
+  {
+    "id": "gp_out_cmd",
+    "type": "mqtt out",
+    "z": "gp_tab",
+    "name": "publish (not retained)",
+    "topic": "",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "gp_broker",
+    "x": 850,
+    "y": 640,
+    "wires": []
+  },
+  {
+    "id": "gp_in_pump",
+    "type": "mqtt in",
+    "z": "gp_tab",
+    "name": "Pump state",
+    "topic": "greenpulse/+/pump/state",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "gp_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 140,
+    "y": 720,
+    "wires": [
+      [
+        "gp_fn_pump_text"
+      ]
+    ]
+  },
+  {
+    "id": "gp_fn_pump_text",
+    "type": "function",
+    "z": "gp_tab",
+    "name": "Describe pump state",
+    "func": "const s = msg.payload || {};\nconst at = new Date().toLocaleTimeString();\nif (s.state === \"on\") msg.payload = `Running ${s.duration_s} s (${s.source}) · ${at}`;\nelse if (s.state === \"off\") msg.payload = `Off · ran ${s.ran_s} s, ${s.result} (${s.source}) · ${at}`;\nelse if (s.state === \"rejected\") msg.payload = `Refused (${s.source}): ${s.detail} · ${at}`;\nelse return null;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 720,
+    "wires": [
+      [
+        "gp_t_pump"
+      ]
+    ]
+  },
+  {
+    "id": "gp_t_pump",
+    "type": "ui-text",
+    "z": "gp_tab",
+    "group": "gp_g_water",
+    "order": 4,
+    "width": "4",
+    "height": "1",
+    "name": "",
+    "label": "Pump",
+    "format": "{{msg.payload}}",
+    "layout": "row-left",
+    "style": false,
+    "font": "",
+    "fontSize": 16,
+    "color": "#717171",
+    "wrapText": true,
+    "className": "",
+    "value": "payload",
+    "valueType": "msg",
+    "x": 610,
+    "y": 720,
+    "wires": []
+  },
+  {
+    "id": "gp_c4",
+    "type": "comment",
+    "z": "gp_tab",
+    "name": "All GreenPulse MQTT traffic",
+    "info": "Latest message per topic, with time and full payload (sensor data, AI input and AI output).",
+    "x": 150,
+    "y": 800,
+    "wires": []
+  },
+  {
+    "id": "gp_in_all",
+    "type": "mqtt in",
+    "z": "gp_tab",
+    "name": "greenpulse/#",
+    "topic": "greenpulse/#",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "gp_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 130,
+    "y": 860,
+    "wires": [
+      [
+        "gp_fn_log"
+      ]
+    ]
+  },
+  {
+    "id": "gp_fn_log",
+    "type": "function",
+    "z": "gp_tab",
+    "name": "Latest per topic",
+    "func": "let payload = msg.payload;\ntry { payload = JSON.parse(payload); } catch (e) { /* not JSON: keep the text */ }\nconst log = context.get(\"log\") || {};\nlog[msg.topic] = { topic: msg.topic, time: Date.now(), retained: !!msg.retain, payload };\ncontext.set(\"log\", log);\nreturn { payload: Object.values(log).sort((a, b) => a.topic.localeCompare(b.topic)) };",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 360,
+    "y": 860,
+    "wires": [
+      [
+        "gp_tpl_log"
+      ]
+    ]
+  },
+  {
+    "id": "gp_tpl_log",
+    "type": "ui-template",
+    "z": "gp_tab",
+    "group": "gp_g_mqtt",
+    "page": "",
+    "ui": "",
+    "name": "MQTT message list",
+    "order": 1,
+    "width": "0",
+    "height": "0",
+    "head": "",
+    "format": "<template>\n    <div class=\"gp-log\">\n        <p v-if=\"!rows.length\" class=\"gp-log-meta\">No GreenPulse messages yet.</p>\n        <details v-for=\"row in rows\" :key=\"row.topic\" class=\"gp-log-row\">\n            <summary>\n                <code class=\"gp-log-topic\">{{ row.topic }}</code>\n                <span class=\"gp-log-meta\">{{ new Date(row.time).toLocaleTimeString() }}{{ row.retained ? ' · retained' : '' }}</span>\n                <span class=\"gp-log-preview\">{{ preview(row.payload) }}</span>\n            </summary>\n            <pre class=\"gp-log-json\">{{ pretty(row.payload) }}</pre>\n        </details>\n    </div>\n</template>\n\n<script>\nexport default {\n    computed: {\n        rows () {\n            return Array.isArray(this.msg && this.msg.payload) ? this.msg.payload : []\n        }\n    },\n    methods: {\n        pretty (payload) {\n            return typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)\n        },\n        preview (payload) {\n            const text = typeof payload === 'string' ? payload : JSON.stringify(payload)\n            return text.length > 110 ? text.slice(0, 110) + '…' : text\n        }\n    }\n}\n</script>\n\n<style>\n.gp-log { display: flex; flex-direction: column; gap: 4px; width: 100%; }\n.gp-log-row { border-bottom: 1px solid #e3e8df; padding: 4px 0; }\n.gp-log-row summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }\n.gp-log-topic { font-weight: 600; color: #2f5d1e; }\n.gp-log-meta { font-size: 0.8rem; color: #777; }\n.gp-log-preview { font-family: monospace; font-size: 0.8rem; color: #555; overflow-wrap: anywhere; }\n.gp-log-json { margin: 6px 0 4px; padding: 8px; background: #f5f7f3; border-radius: 4px; font-size: 0.8rem; overflow-x: auto; max-height: 420px; }\n</style>\n",
+    "storeOutMessages": true,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 610,
+    "y": 860,
+    "wires": [
+      []
+    ]
+  }
+]
