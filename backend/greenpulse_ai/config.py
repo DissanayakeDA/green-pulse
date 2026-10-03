@@ -35,6 +35,24 @@ class Settings:
     analysis_interval_s: int = 300
     moisture_change_trigger: float = 5.0
 
+    # MQTT broker used by the live bridge (python -m greenpulse_ai.bridge). A local Mosquitto needs only
+    # the host; AWS IoT Core needs port 8883 plus the CA, certificate and private-key files.
+    mqtt_host: str = "localhost"
+    mqtt_port: int = 1883
+    mqtt_username: str | None = None
+    mqtt_password: str | None = None
+    mqtt_client_id: str = "greenpulse-backend"
+    mqtt_ca_file: str | None = None
+    mqtt_cert_file: str | None = None
+    mqtt_key_file: str | None = None
+
+    # Auto-watering. Off until enabled here or with the Node-RED switch. The ESP32 enforces its own
+    # hard limits (maximum run time, rest time, wet-soil cut-off) on top of these.
+    auto_watering: bool = False
+    water_pulse_s: float = 5.0  # one short pulse, then let it soak before the sensor is trusted again
+    water_cooldown_s: int = 1800
+    water_max_per_day: int = 6
+
     @classmethod
     def from_env(cls) -> Settings:
         load_dotenv()
@@ -51,4 +69,16 @@ class Settings:
             topic_prefix=_optional("MQTT_TOPIC_PREFIX") or cls.topic_prefix,
             analysis_interval_s=int(_optional("ANALYSIS_INTERVAL_S") or cls.analysis_interval_s),
             moisture_change_trigger=float(_optional("MOISTURE_CHANGE_TRIGGER") or cls.moisture_change_trigger),
+            mqtt_host=_optional("MQTT_HOST") or cls.mqtt_host,
+            mqtt_port=int(_optional("MQTT_PORT") or cls.mqtt_port),
+            mqtt_username=_optional("MQTT_USERNAME"),
+            mqtt_password=_optional("MQTT_PASSWORD"),
+            mqtt_client_id=_optional("MQTT_CLIENT_ID") or cls.mqtt_client_id,
+            mqtt_ca_file=_optional("MQTT_CA_FILE"),
+            mqtt_cert_file=_optional("MQTT_CERT_FILE"),
+            mqtt_key_file=_optional("MQTT_KEY_FILE"),
+            auto_watering=_flag("AUTO_WATERING"),
+            water_pulse_s=float(_optional("WATER_PULSE_S") or cls.water_pulse_s),
+            water_cooldown_s=int(_optional("WATER_COOLDOWN_S") or cls.water_cooldown_s),
+            water_max_per_day=int(_optional("WATER_MAX_PER_DAY") or cls.water_max_per_day),
         )

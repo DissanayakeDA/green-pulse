@@ -3,10 +3,15 @@
 Component 1 of 4 (Dissanayake D A, IT23306622): LLM integration, the Environment and Plant Doctor
 agents, agent orchestration, prompts and final care-tip generation.
 
-The ESP32 and the AWS IoT Core link are not built yet, so this component runs on **hardcoded dummy
-data** (`greenpulse_ai/dummy_data.py`): seven scenarios of sensor readings, weather and inbox
-messages, plus a fake ESP32 that streams readings over a simulated day. The same code will take real
-readings from MQTT later without changes to the agents.
+It runs two ways:
+
+- **Live:** `python -m greenpulse_ai.bridge` connects to the MQTT broker, analyses real ESP32
+  readings, publishes the advice for Node-RED and the priority for the RGB LED, and runs the water
+  pump when auto-watering is on. For the whole setup (wiring, firmware, broker, Node-RED), see
+  [docs/integration.md](../docs/integration.md).
+- **Offline demo:** `python -m greenpulse_ai` runs on **hardcoded dummy data**
+  (`greenpulse_ai/dummy_data.py`): seven scenarios of sensor readings, weather and inbox messages,
+  plus a fake ESP32 that streams readings over a simulated day.
 
 ## Quick start (Windows PowerShell)
 
@@ -21,12 +26,16 @@ python -m greenpulse_ai                        # run the default scenario (dryin
 python -m greenpulse_ai --scenario overwatered --json   # show the full MQTT payloads
 python -m greenpulse_ai --all                  # every scenario as a table
 python -m greenpulse_ai --simulate             # fake ESP32 stream through the service
-python -m pytest                               # 50 tests, no API key needed
+python -m pytest                               # 76 tests, no API key or broker needed
+
+python -m greenpulse_ai.bridge                 # live: real ESP32 readings over MQTT (MQTT_HOST in .env)
+python -m greenpulse_ai.bridge --offline       # live, but rule-based agents only (no LLM cost)
 ```
 
 With no API key everything runs in **offline mode**: the agents use their rule-based reasoning.
-To use the LLM, copy `.env.example` to `.env` and set `OPENAI_API_KEY`. The model is set by
-`LLM_MODEL` (default `openai:gpt-5.4-mini`). Any LangChain `provider:model` string works if the
+To use the LLM, copy `.env.example` to `.env` and paste your key. The example uses Groq
+(`GROQ_API_KEY`, `LLM_MODEL=groq:openai/gpt-oss-120b`). For OpenAI, set `OPENAI_API_KEY` and
+`LLM_MODEL=openai:gpt-5.4-mini` instead. Any LangChain `provider:model` string works if the
 provider's package is installed.
 
 ## How it works
@@ -73,20 +82,41 @@ the model is told never to follow instructions found inside it.
 - a moisture change of at least `MOISTURE_CHANGE_TRIGGER` points
 - a change in the sensor baseline priority
 
+## Auto-watering (the water pump)
+
+After each analysis, `WateringPolicy` (`greenpulse_ai/watering.py`) decides whether to send a pump
+pulse. The LLM cannot switch the pump on by itself. All of these must hold:
+
+- auto-watering is on (`AUTO_WATERING` in `.env`, or the Node-RED switch, which overrides it)
+- the soil sensor itself reads below the plant's ideal range, so a working sensor is required
+- the Plant Doctor rates the situation `high` or `critical`
+- no watering (auto or manual) in the last `WATER_COOLDOWN_S`, so the last pulse has time to soak in
+- fewer than `WATER_MAX_PER_DAY` pulses in 24 h
+
+Each pulse lasts `WATER_PULSE_S` seconds. The ESP32 adds its own hard limits (maximum run time, rest
+time, refusing to pump into wet soil), so a bad MQTT message cannot flood the pot. The decision and
+its reason go out in `ai/care` under `watering`.
+
 ## MQTT contract (proposed; Karunarathna to finalise)
 
 | Topic | Direction | Payload |
 |---|---|---|
-| `greenpulse/<device_id>/sensors` | ESP32 → backend | `{"soil_moisture": 41.5, "temperature": 29.1, "humidity": 58.0}`. `device_id` and `timestamp` are optional; use `null` for a failed sensor read. |
+| `greenpulse/<device_id>/sensors` | ESP32 → backend, Node-RED | `{"soil_moisture": 41.5, "temperature": 29.1, "humidity": 58.0}`. `device_id` and `timestamp` are optional; use `null` for a failed sensor read. Extra fields (`soil_raw`, `rssi`) are ignored. |
+| `greenpulse/<device_id>/status` | ESP32 → Node-RED | `{"online": true, "ip": ..., "firmware": ...}`, **retained**. Last will: `{"online": false}`. |
 | `greenpulse/<device_id>/ai/input` | backend → Node-RED | Reading plus the Environment, Weather and Notification reports (the AI input). |
-| `greenpulse/<device_id>/ai/care` | backend → Node-RED | `priority`, `priority_code`, `led`, `headline`, `message`, `actions`, `reasoning`, `source`, `model`, `guardrail_note`, `trigger`, `duration_ms` |
-| `greenpulse/<device_id>/priority` | backend → ESP32 | `{"priority": "high", "priority_code": 2, "led": "orange"}`. Publish it **retained**, so the ESP32 gets the current priority when it reconnects. |
+| `greenpulse/<device_id>/ai/care` | backend → Node-RED | `priority`, `priority_code`, `led`, `headline`, `message`, `actions`, `reasoning`, `source`, `model`, `guardrail_note`, `trigger`, `duration_ms`, `watering`. **Retained**, so the dashboard shows the last advice after a restart. |
+| `greenpulse/<device_id>/priority` | backend → ESP32 | `{"priority": "high", "priority_code": 2, "led": "orange"}`. **Retained**, so the ESP32 gets the current priority when it reconnects. |
+| `greenpulse/<device_id>/pump/command` | backend or Node-RED → ESP32 | `{"action": "on", "duration_s": 5, "source": "auto", "reason": ...}` or `{"action": "off"}`. **Never retained**: the ESP32 would re-run a stale command on every reconnect. |
+| `greenpulse/<device_id>/pump/state` | ESP32 → backend, Node-RED | `{"state": "on" \| "off" \| "rejected", "source": ..., "duration_s" / "ran_s" / "detail": ...}` |
+| `greenpulse/<device_id>/pump/auto` | Node-RED → backend | `true` / `false`, **retained**: the auto-watering switch. |
 
 Run `python -m greenpulse_ai --json` to see full example payloads.
 
 ## Integration points
 
-**Cloud MQTT (Karunarathna).** Call the service from your subscriber and publish what comes back:
+**Cloud MQTT (Karunarathna).** `greenpulse_ai/bridge.py` is a ready subscriber. For AWS IoT Core, set
+`MQTT_HOST`, `MQTT_PORT=8883` and the three certificate paths in `.env`, and allow the topics above
+in the IoT policy. To embed the service in your own subscriber instead:
 
 ```python
 import json
@@ -101,7 +131,7 @@ def on_sensor_message(topic: str, payload: bytes) -> None:
     result = service.handle_reading(reading)   # None = no new analysis needed
     if result:
         for out_topic, body in build_messages(result, topics):
-            publish(out_topic, json.dumps(body), retain=out_topic.endswith("/priority"))
+            publish(out_topic, json.dumps(body), retain=out_topic in topics.retained(result.device_id))
 ```
 
 `handle_reading` blocks while the LLM runs (a few seconds). Call it off the MQTT network thread, for
@@ -111,8 +141,11 @@ example through a queue or worker thread.
 returns a `WeatherReport` or `NotificationReport` (see `greenpulse_ai/schemas.py`). Pass it as
 `build_service(settings, llm, weather_agent=..., notification_agent=...)`. Nothing else changes.
 
-**Firmware (Bandara).** Subscribe to `greenpulse/<device_id>/priority` and map `priority_code`
-(0–3) to the LED colour. Publish soil moisture as a calibrated 0–100 %.
+**Firmware (Bandara).** `firmware/greenpulse_esp32/` implements the device side of the contract:
+sensors, the 16x2 LCD, RGB LED from `priority_code` (0–3) and the pump relay.
+
+**Dashboard (Thashmila).** Import `node-red/greenpulse-flow.json` (needs
+`@flowfuse/node-red-dashboard`).
 
 ## Layout
 
@@ -128,7 +161,9 @@ greenpulse_ai/
   schemas.py               Pydantic data contracts, including the LLM output schemas
   plant_profiles.py        ideal ranges per plant type
   mqtt_payloads.py         topics, ESP32 payload parsing, outgoing payloads
+  watering.py              auto-watering decision (pump safety gates)
+  bridge.py                live MQTT bridge: python -m greenpulse_ai.bridge
   dummy_data.py            hardcoded scenarios + fake ESP32 stream
   __main__.py              CLI demo
-tests/                     pytest suite (uses a fake LLM, no network)
+tests/                     pytest suite (uses a fake LLM and a fake MQTT client, no network)
 ```
