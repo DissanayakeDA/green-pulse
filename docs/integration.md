@@ -133,9 +133,16 @@ pip install -r requirements.txt          # adds paho-mqtt
 python -m greenpulse_ai.bridge           # add --offline to skip LLM calls while testing
 ```
 
-`MQTT_HOST=localhost` in `.env` works because Mosquitto runs on the same laptop. You should see:
+`MQTT_HOST=localhost` in `.env` works because Mosquitto runs on the same laptop. The Weather Agent
+needs no setup. To let the Notification Agent read your Gmail reminders, set `EMAIL_ADDRESS` and
+`EMAIL_APP_PASSWORD` (an app password, see
+[backend/README.md](../backend/README.md#weather-and-email-the-external-agents)). You should see:
 
 ```
+GreenPulse bridge | broker localhost:1883 | plant: Pothos (Money Plant) | mode: LLM groq:openai/gpt-oss-120b | ...
+Weather: Open-Meteo for Colombo, LK (6.9271, 79.8612) | email: you@gmail.com (INBOX)
+Listening on greenpulse/+/sensors. Ctrl+C to stop.
+
 16:41:14 INFO    Connected to localhost:1883
 16:41:16 INFO    greenpulse-01  soil 29%  29.4°C  61% RH
 16:41:16 INFO    greenpulse-01  -> [first reading] HIGH Water within 2 h | pump: Auto-watering is off | llm via groq:openai/gpt-oss-120b
@@ -153,8 +160,9 @@ node-red
 2. Go to Menu → **Import**, select `node-red/greenpulse-flow.json`, then click **Deploy**.
 3. Open the dashboard at <http://localhost:1880/dashboard/greenpulse>.
 
-It shows live gauges, a 24-hour chart, the Plant Doctor's advice, the pump controls and the latest
-message on every GreenPulse topic, with timestamps (the AI input and output payloads). The device ID
+It shows live gauges, a 24-hour chart, the Plant Doctor's advice, the weather and email reminders
+the Plant Doctor was given, the pump controls and the latest message on every GreenPulse topic, with
+timestamps (the AI input and output payloads). The device ID
 (`greenpulse-01`) and the manual watering time (5 s) are environment variables on the flow tab: in
 the editor, double-click the tab to change them.
 
@@ -162,10 +170,15 @@ the editor, double-click the tab to change them.
 
 1. The Serial Monitor shows `MQTT ... connected`, and the dashboard shows **ESP32: Online**.
 2. The bridge logs a reading every 10 s and a Plant Doctor analysis. The LED changes colour and the
-   advice card fills in.
-3. **Manual pump:** put the pump outlet back into the tank, then press **Water now**. The pump runs
+   advice card fills in. The **Weather & reminders** card shows `live · Open-Meteo` with the current
+   weather for your location.
+3. **Email reminders:** send yourself an email such as "Reminder: fertilise the money plant this
+   weekend". The mailbox is checked at most every 10 minutes, so within 10 minutes (sooner if you
+   restart the bridge) the card lists it under *Email reminders*, and the Plant Doctor takes it into
+   account in its next advice.
+4. **Manual pump:** put the pump outlet back into the tank, then press **Water now**. The pump runs
    for 5 s and the Pump line shows `Off · ran 5.0 s, done (manual)`.
-4. **Auto-watering:** pull the soil probe out of the soil so it reads dry, then turn on
+5. **Auto-watering:** pull the soil probe out of the soil so it reads dry, then turn on
    **Auto-watering (AI)**. The next reading is analysed at once, and the pump pulses within about
    10 s. The advice card explains the decision. With the probe back in wet soil, the pump stays off.
 
@@ -202,6 +215,9 @@ Attach a policy like this to all three certificates, with your region and accoun
 The Node-RED flow already subscribes with QoS 1. AWS IoT Core does not support QoS 2, which is
 Node-RED's default.
 
+To run the backend and Node-RED on an EC2 server instead of the laptop, see
+[deployment.md](deployment.md).
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
@@ -214,4 +230,8 @@ Node-RED's default.
 | Pump runs at boot or never | Flip `PUMP_ACTIVE_LOW` |
 | Pump line says `Refused: ...` | An ESP32 safety limit applied; the reason is shown |
 | Advice card says "Waiting…" | The bridge isn't running or can't reach the broker |
+| Weather shows "unavailable" | The backend has no internet access, or `WEATHER_LATITUDE` / `WEATHER_LONGITUDE` is not a number |
+| Bridge log: `AUTHENTICATIONFAILED` | `EMAIL_APP_PASSWORD` is wrong or revoked, or it is the normal account password; create a new app password |
+| Bridge log: `Mailbox folder ... not found` | `EMAIL_FOLDER` doesn't match a Gmail label exactly (labels are case-sensitive) |
+| Email reminder not listed | It is older than 7 days, has no plant-care or travel keyword, or the 10-minute mailbox cache hasn't expired yet |
 | MQTT nodes show "disconnected" in Node-RED | Wrong broker settings in the "GreenPulse broker" node |

@@ -1,5 +1,8 @@
+import imaplib
 import sys
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+from email.utils import format_datetime
 from pathlib import Path
 
 import pytest
@@ -40,6 +43,76 @@ class FakeLLM:
             return response
 
         return RunnableLambda(respond)
+
+
+def open_meteo_response(temperature=29.4, humidity=71, code=3, hourly_temps=(29.4, 30.1, 28.0), rain=(94, 60, 8)) -> dict:
+    """The shape of a real https://api.open-meteo.com/v1/forecast response (current + hourly)."""
+    return {
+        "timezone": "Asia/Colombo",
+        "current": {"time": "2026-09-29T15:30", "temperature_2m": temperature, "relative_humidity_2m": humidity, "weather_code": code},
+        "hourly": {
+            "time": [f"2026-09-29T{15 + i}:00" for i in range(len(hourly_temps))],
+            "temperature_2m": list(hourly_temps),
+            "precipitation_probability": list(rain),
+        },
+    }
+
+
+def make_email(subject: str, body: str, sender="reminders@plantdiary.example.com", html: str | None = None, hours_ago=1.0) -> bytes:
+    message = EmailMessage()
+    message["From"] = sender
+    message["To"] = "plant.owner@example.com"
+    message["Subject"] = subject
+    message["Date"] = format_datetime(T0 - timedelta(hours=hours_ago))
+    if body:
+        message.set_content(body)
+    if html:
+        if body:
+            message.add_alternative(html, subtype="html")
+        else:
+            message.set_content(html, subtype="html")
+    return bytes(message)
+
+
+class FakeImap:
+    """Stands in for imaplib.IMAP4_SSL: serves `messages` (oldest first) and records every call."""
+
+    def __init__(self, messages: list[bytes], password="app-password", folders=("INBOX",)):
+        self.messages = messages
+        self.password = password
+        self.folders = folders
+        self.calls: list[tuple] = []
+
+    def __call__(self, host, timeout=None):  # the "connect" function
+        self.calls.append(("connect", host))
+        return self
+
+    def login(self, username, password):
+        self.calls.append(("login", username))
+        if password != self.password:
+            raise imaplib.IMAP4.error("[AUTHENTICATIONFAILED] Invalid credentials")
+
+    def select(self, mailbox, readonly=False):
+        self.calls.append(("select", mailbox, readonly))
+        return ("OK", [str(len(self.messages)).encode()]) if mailbox.strip('"') in self.folders else ("NO", [b"Unknown"])
+
+    def search(self, charset, *criteria):
+        self.calls.append(("search", *criteria))
+        return "OK", [" ".join(str(i + 1) for i in range(len(self.messages))).encode()]
+
+    def fetch(self, message_set, parts):
+        self.calls.append(("fetch", message_set, parts))
+        data = []
+        for seq in message_set.split(","):
+            raw = self.messages[int(seq) - 1]
+            data += [(f"{seq} (BODY[]<0> {{{len(raw)}}}".encode(), raw), b")"]
+        return "OK", data
+
+    def logout(self):
+        self.calls.append(("logout",))
+
+    def connections(self) -> int:
+        return sum(1 for call in self.calls if call[0] == "connect")
 
 
 @pytest.fixture

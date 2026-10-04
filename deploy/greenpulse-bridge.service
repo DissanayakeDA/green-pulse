@@ -1,0 +1,24 @@
+# systemd service for the GreenPulse AI backend (MQTT bridge + Multi-Agent Plant Doctor) on EC2.
+# Assumes Ubuntu with the repo cloned to /home/ubuntu/green-pulse; see docs/deployment.md.
+#
+#   sudo cp deploy/greenpulse-bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now greenpulse-bridge
+#   journalctl -u greenpulse-bridge -f        # live log
+
+[Unit]
+Description=GreenPulse AI backend (MQTT bridge + Multi-Agent Plant Doctor)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=ubuntu
+# The relative certificate paths in .env (certs/...) are resolved from here.
+WorkingDirectory=/home/ubuntu/green-pulse/backend
+ExecStart=/home/ubuntu/green-pulse/backend/.venv/bin/python -m greenpulse_ai.bridge
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
