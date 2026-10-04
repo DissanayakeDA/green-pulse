@@ -153,13 +153,27 @@
     "groupType": "default"
   },
   {
+    "id": "gp_g_context",
+    "type": "ui-group",
+    "name": "Weather & reminders (agent inputs)",
+    "page": "gp_ui_page",
+    "width": "12",
+    "height": "1",
+    "order": 3,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
     "id": "gp_g_hist",
     "type": "ui-group",
     "name": "Last 24 hours",
     "page": "gp_ui_page",
     "width": "8",
     "height": "1",
-    "order": 3,
+    "order": 4,
     "showTitle": true,
     "className": "",
     "visible": "true",
@@ -173,7 +187,7 @@
     "page": "gp_ui_page",
     "width": "4",
     "height": "1",
-    "order": 4,
+    "order": 5,
     "showTitle": true,
     "className": "",
     "visible": "true",
@@ -187,7 +201,7 @@
     "page": "gp_ui_page",
     "width": "12",
     "height": "1",
-    "order": 5,
+    "order": 6,
     "showTitle": true,
     "className": "",
     "visible": "true",
@@ -985,6 +999,61 @@
     "className": "",
     "x": 610,
     "y": 860,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "gp_c5",
+    "type": "comment",
+    "z": "gp_tab",
+    "name": "Backend -> Weather & Notification agents",
+    "info": "The ai/input payload: what the Weather Agent (Open-Meteo) and the Notification Agent (mailbox) reported to the Plant Doctor for its last analysis.",
+    "x": 190,
+    "y": 940,
+    "wires": []
+  },
+  {
+    "id": "gp_in_ai_input",
+    "type": "mqtt in",
+    "z": "gp_tab",
+    "name": "AI input",
+    "topic": "greenpulse/+/ai/input",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "gp_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 130,
+    "y": 1000,
+    "wires": [
+      [
+        "gp_tpl_context"
+      ]
+    ]
+  },
+  {
+    "id": "gp_tpl_context",
+    "type": "ui-template",
+    "z": "gp_tab",
+    "group": "gp_g_context",
+    "page": "",
+    "ui": "",
+    "name": "Weather & reminders card",
+    "order": 1,
+    "width": "0",
+    "height": "0",
+    "head": "",
+    "format": "<template>\n    <div v-if=\"input\" class=\"gp-ctx\">\n        <section>\n            <h4>Weather <span class=\"gp-src\">{{ label(weather.source) }}</span></h4>\n            <p>{{ weather.summary }}</p>\n            <div class=\"gp-tags\">\n                <span v-if=\"weather.heat_alert\" class=\"gp-tag gp-hot\">Heat alert</span>\n                <span v-if=\"weather.rain_expected\" class=\"gp-tag gp-rain\">Rain likely</span>\n            </div>\n        </section>\n        <section>\n            <h4>Email reminders <span class=\"gp-src\">{{ label(notes.source) }}</span></h4>\n            <ul v-if=\"notes.reminders.length\" class=\"gp-rem\">\n                <li v-for=\"(r, i) in notes.reminders\" :key=\"i\">\n                    <span class=\"gp-tag\">{{ r.kind }}</span> <b>{{ r.title }}</b>\n                    <div class=\"gp-ctx-meta\">{{ r.sender }}<span v-if=\"r.received\"> · {{ when(r.received) }}</span></div>\n                </li>\n            </ul>\n            <p v-else>{{ notes.summary }}</p>\n        </section>\n        <p class=\"gp-ctx-meta gp-ctx-time\">Checked for the analysis at {{ when(input.timestamp) }} ({{ input.trigger }})</p>\n    </div>\n    <p v-else class=\"gp-ctx-meta\">Waiting for the first analysis. Is the backend bridge running?</p>\n</template>\n\n<script>\nexport default {\n    computed: {\n        input () {\n            const p = this.msg && this.msg.payload\n            return p && p.weather && p.notifications ? p : null\n        },\n        weather () {\n            return this.input.weather\n        },\n        notes () {\n            return this.input.notifications\n        }\n    },\n    methods: {\n        label (source) {\n            return {\n                'open-meteo': 'live · Open-Meteo',\n                email: 'live · mailbox',\n                'not-configured': 'email not connected',\n                unavailable: 'unavailable',\n                dummy: 'dummy data'\n            }[source] || source\n        },\n        when (iso) {\n            return new Date(iso).toLocaleString()\n        }\n    }\n}\n</script>\n\n<style>\n.gp-ctx { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }\n.gp-ctx h4 { margin: 0 0 6px; font-size: 1rem; display: flex; align-items: baseline; gap: 8px; }\n.gp-ctx p { margin: 0; line-height: 1.45; }\n.gp-src { font-size: 0.75rem; font-weight: 400; color: #777; }\n.gp-tags { display: flex; gap: 6px; margin-top: 6px; }\n.gp-tag { font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; background: #e8f5e9; color: #2e7d32; text-transform: capitalize; }\n.gp-hot { background: #fdecea; color: #c62828; }\n.gp-rain { background: #e3f2fd; color: #1565c0; }\n.gp-rem { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }\n.gp-ctx-meta { margin: 0; font-size: 0.8rem; color: #777; }\n.gp-ctx-time { grid-column: 1 / -1; }\n</style>\n",
+    "storeOutMessages": true,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 400,
+    "y": 1000,
     "wires": [
       []
     ]
