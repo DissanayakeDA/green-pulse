@@ -6,9 +6,11 @@ agents, agent orchestration, prompts and final care-tip generation.
 It runs two ways:
 
 - **Live:** `python -m greenpulse_ai.bridge` connects to the MQTT broker, analyses real ESP32
-  readings, publishes the advice for Node-RED and the priority for the RGB LED, and runs the water
-  pump when auto-watering is on. For the whole setup (wiring, firmware, broker, Node-RED), see
-  [docs/integration.md](../docs/integration.md).
+  readings together with the live weather forecast and the reminders in your email, publishes the
+  advice for Node-RED and the priority for the RGB LED, and runs the water pump when auto-watering
+  is on. For the whole setup (wiring, firmware, broker, Node-RED), see
+  [docs/integration.md](../docs/integration.md); for the cloud server, see
+  [docs/deployment.md](../docs/deployment.md).
 - **Offline demo:** `python -m greenpulse_ai` runs on **hardcoded dummy data**
   (`greenpulse_ai/dummy_data.py`): seven scenarios of sensor readings, weather and inbox messages,
   plus a fake ESP32 that streams readings over a simulated day.
@@ -26,7 +28,8 @@ python -m greenpulse_ai                        # run the default scenario (dryin
 python -m greenpulse_ai --scenario overwatered --json   # show the full MQTT payloads
 python -m greenpulse_ai --all                  # every scenario as a table
 python -m greenpulse_ai --simulate             # fake ESP32 stream through the service
-python -m pytest                               # 76 tests, no API key or broker needed
+python -m greenpulse_ai --live-context         # dummy sensors + live weather and your real mailbox
+python -m pytest                               # 114 tests, no API key, broker or network needed
 
 python -m greenpulse_ai.bridge                 # live: real ESP32 readings over MQTT (MQTT_HOST in .env)
 python -m greenpulse_ai.bridge --offline       # live, but rule-based agents only (no LLM cost)
@@ -50,12 +53,39 @@ SensorReading ─┬─> Environment Agent  ─┐
 | Agent | Owner | What it does |
 |---|---|---|
 | Environment | Dissanayake | Code checks each reading against the plant profile's ideal range, fits the soil-drying trend and computes hours until dry and a **baseline priority**. The LLM turns those facts into a plain-language assessment. |
-| Weather | Thashmila (stand-in here) | `DummyWeatherAgent` summarises a hardcoded forecast and flags heat or rain. |
-| Notification | Thashmila (stand-in here) | `DummyNotificationAgent` filters a hardcoded inbox for watering, fertilising, repotting or travel messages. |
+| Weather | Thashmila | `OpenMeteoWeatherAgent` reads the live forecast for the next 12 h from [Open-Meteo](https://open-meteo.com) (free, no API key) and flags heat or rain. |
+| Notification | Thashmila | `ImapNotificationAgent` reads the last 7 days of a Gmail inbox over IMAP and keeps the watering, fertilising, repotting and travel messages. |
 | Plant Doctor | Dissanayake | The LLM combines the three reports into a headline, message, actions, priority and reasoning (LangChain structured output). |
 
 The three analysis agents run in parallel. If the weather or notification agent fails, the Plant
-Doctor still advises from the sensors alone.
+Doctor still advises from the sensors alone. The offline demo and the tests use `DummyWeatherAgent`
+and `DummyNotificationAgent` instead, which run the same summarising code on the scenario's
+hardcoded forecast and inbox.
+
+## Weather and email (the external agents)
+
+**Weather.** No setup is needed. The forecast is for `WEATHER_LATITUDE` / `WEATHER_LONGITUDE`
+(default: Colombo); change both together with `LOCATION`, which is only the name shown in the
+advice. One request is reused for 15 minutes. If Open-Meteo can't be reached, the last forecast is
+reused for up to 3 hours, and after that the weather is reported as unavailable.
+
+**Email.** Without `EMAIL_ADDRESS` and `EMAIL_APP_PASSWORD`, the report says email is not connected.
+To connect a Gmail account:
+
+1. Turn on 2-Step Verification for the Google account.
+2. Create an app password at <https://myaccount.google.com/apppasswords>.
+3. Put the address and the 16-letter app password in `.env`. Never use the normal account password.
+4. Test it without the ESP32: `python -m greenpulse_ai --live-context --offline`. The
+   NOTIFICATIONS line should start with `[email]`.
+
+To try it, send yourself an email such as "Reminder: fertilise the money plant this weekend".
+
+**Privacy.** The mailbox is opened read-only, and messages are fetched with `BODY.PEEK`, so nothing
+is marked as read. Only messages that match a plant-care or travel keyword (whole words, so
+"waterproof" doesn't count) are passed on, at most five, with the body cut to 300 characters. The
+rest of the inbox never reaches the LLM. To limit it further, create a Gmail label (for example
+`GreenPulse`), add a filter that applies it to plant reminders, and set `EMAIL_FOLDER=GreenPulse`.
+The mailbox is checked at most every 10 minutes.
 
 **Priority levels**, sent to the ESP32 for the RGB LED:
 
@@ -137,15 +167,18 @@ def on_sensor_message(topic: str, payload: bytes) -> None:
 `handle_reading` blocks while the LLM runs (a few seconds). Call it off the MQTT network thread, for
 example through a queue or worker thread.
 
-**Weather and Notification agents (Thashmila).** Write a class with `name` and a `run()` method that
-returns a `WeatherReport` or `NotificationReport` (see `greenpulse_ai/schemas.py`). Pass it as
-`build_service(settings, llm, weather_agent=..., notification_agent=...)`. Nothing else changes.
+**Weather and Notification agents (Thashmila).** `live_context_agents(settings)` builds the real
+agents from `.env`; the bridge passes them as
+`build_service(settings, llm, weather_agent=..., notification_agent=...)`. To use another source
+(say, a different weather API), write a class with `name` and a `run()` method that returns a
+`WeatherReport` or `NotificationReport` (see `greenpulse_ai/schemas.py`) and pass that instead.
 
 **Firmware (Bandara).** `firmware/greenpulse_esp32/` implements the device side of the contract:
 sensors, the 16x2 LCD, RGB LED from `priority_code` (0–3) and the pump relay.
 
 **Dashboard (Thashmila).** Import `node-red/greenpulse-flow.json` (needs
-`@flowfuse/node-red-dashboard`).
+`@flowfuse/node-red-dashboard`). The "Weather & reminders" card shows what the two external agents
+reported for the last analysis (from `ai/input`).
 
 ## Layout
 
@@ -153,9 +186,9 @@ sensors, the 16x2 LCD, RGB LED from `priority_code` (0–3) and the pump relay.
 greenpulse_ai/
   agents/environment.py    Environment Agent (rules + LLM)
   agents/plant_doctor.py   Plant Doctor Agent, guardrail, rule-based fallback
-  agents/weather.py        Weather Agent interface + dummy stand-in
-  agents/notification.py   Notification Agent interface + dummy stand-in
-  orchestrator.py          parallel agent pipeline + PlantCareService (history, throttling)
+  agents/weather.py        Weather Agent: Open-Meteo forecast + dummy stand-in
+  agents/notification.py   Notification Agent: IMAP mailbox + dummy stand-in
+  orchestrator.py          parallel agent pipeline, PlantCareService (history, throttling), live agents
   prompts.py               LangChain prompt templates
   llm.py                   chat model setup (init_chat_model) / offline switch
   schemas.py               Pydantic data contracts, including the LLM output schemas
@@ -165,5 +198,5 @@ greenpulse_ai/
   bridge.py                live MQTT bridge: python -m greenpulse_ai.bridge
   dummy_data.py            hardcoded scenarios + fake ESP32 stream
   __main__.py              CLI demo
-tests/                     pytest suite (uses a fake LLM and a fake MQTT client, no network)
+tests/                     pytest suite (fake LLM, MQTT client, weather API and IMAP server; no network)
 ```

@@ -26,7 +26,7 @@ import paho.mqtt.client as mqtt
 from .config import Settings
 from .llm import create_chat_model
 from .mqtt_payloads import Topics, build_messages, parse_sensor_payload
-from .orchestrator import PlantCareService, build_service
+from .orchestrator import PlantCareService, build_service, describe_context, live_context_agents
 from .plant_profiles import PROFILES, get_profile
 from .schemas import CareResult, SensorReading
 from .watering import WateringPolicy
@@ -234,13 +234,16 @@ def main(argv: list[str] | None = None) -> None:
         settings = dataclasses.replace(settings, plant_profile=args.plant)
 
     llm = create_chat_model(settings)
-    bridge = Bridge(settings, build_service(settings, llm), WateringPolicy.from_settings(settings))
+    weather, notifications = live_context_agents(settings)
+    service = build_service(settings, llm, weather, notifications)
+    bridge = Bridge(settings, service, WateringPolicy.from_settings(settings))
     tls = " (TLS)" if uses_tls(settings) else ""
     print(
         f"GreenPulse bridge | broker {settings.mqtt_host}:{settings.mqtt_port}{tls} | "
         f"plant: {get_profile(settings.plant_profile).name} | "
         f"mode: {'LLM ' + settings.llm_model if llm else 'rules only (offline)'} | "
         f"auto-watering: {'on' if settings.auto_watering else 'off'} until the dashboard switch says otherwise\n"
+        f"{describe_context(settings)}\n"
         f"Listening on {bridge.topics.sensors('+')}. Ctrl+C to stop.\n",
         flush=True,
     )

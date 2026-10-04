@@ -23,9 +23,9 @@ from langchain_core.language_models import BaseChatModel
 
 from . import dummy_data
 from .agents.environment import EnvironmentAgent
-from .agents.notification import DummyNotificationAgent, NotificationAgent
+from .agents.notification import DummyNotificationAgent, ImapNotificationAgent, NoMailboxAgent, NotificationAgent
 from .agents.plant_doctor import PlantDoctorAgent
-from .agents.weather import DummyWeatherAgent, WeatherAgent
+from .agents.weather import DummyWeatherAgent, OpenMeteoWeatherAgent, WeatherAgent
 from .config import Settings
 from .plant_profiles import get_profile
 from .schemas import CareResult, NotificationReport, SensorReading, WeatherReport
@@ -150,8 +150,9 @@ def build_pipeline(
     weather_agent: WeatherAgent | None = None,
     notification_agent: NotificationAgent | None = None,
 ) -> PlantDoctorPipeline:
-    """Wire the agents together. Until the real weather/notification agents exist, they default to
-    dummy stand-ins with neutral context (mild weather, no reminders)."""
+    """Wire the agents together. Without explicit weather/notification agents they default to dummy
+    stand-ins with neutral context (mild weather, no reminders), for the offline demo and the tests.
+    The live bridge passes the real ones from live_context_agents()."""
     profile = get_profile(settings.plant_profile)
     neutral = dummy_data.SCENARIOS["healthy"]
     return PlantDoctorPipeline(
@@ -160,6 +161,31 @@ def build_pipeline(
         notifications=notification_agent or DummyNotificationAgent(neutral.messages),
         doctor=PlantDoctorAgent(profile, llm),
         model=settings.llm_model if llm else None,
+    )
+
+
+def live_context_agents(settings: Settings) -> tuple[WeatherAgent, NotificationAgent]:
+    """The real Weather Agent (Open-Meteo forecast) and Notification Agent (IMAP mailbox). Without
+    EMAIL_ADDRESS and EMAIL_APP_PASSWORD the notification report says email is not connected."""
+    weather = OpenMeteoWeatherAgent(settings.location, settings.weather_latitude, settings.weather_longitude)
+    if settings.email_address and settings.email_app_password:
+        notifications: NotificationAgent = ImapNotificationAgent(
+            settings.email_imap_host, settings.email_address, settings.email_app_password, settings.email_folder
+        )
+    else:
+        notifications = NoMailboxAgent()
+    return weather, notifications
+
+
+def describe_context(settings: Settings) -> str:
+    """One line naming the live context sources, for start-up messages."""
+    if settings.email_address and settings.email_app_password:
+        email = f"{settings.email_address} ({settings.email_folder})"
+    else:
+        email = "not connected (set EMAIL_ADDRESS and EMAIL_APP_PASSWORD in .env)"
+    return (
+        f"Weather: Open-Meteo for {settings.location} ({settings.weather_latitude}, {settings.weather_longitude}) | "
+        f"email: {email}"
     )
 
 

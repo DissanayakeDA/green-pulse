@@ -1,10 +1,11 @@
 import json
 
 from greenpulse_ai import Settings, build_service
+from greenpulse_ai.agents import ImapNotificationAgent, OpenMeteoWeatherAgent
 from greenpulse_ai.bridge import Bridge, _parse_switch, uses_tls
 from greenpulse_ai.watering import WateringPolicy
 
-from conftest import T0
+from conftest import T0, FakeImap, make_email, open_meteo_response
 
 
 class FakeClient:
@@ -124,6 +125,29 @@ def test_device_id_comes_from_the_topic():
     bridge.handle_message("greenpulse/balcony-02/sensors", sensors(50))
     bridge.process_pending()
     assert client.topics()[0] == "greenpulse/balcony-02/ai/input"
+
+
+def test_live_weather_and_email_reach_the_plant_doctor():
+    """End to end with the real Weather and Notification agents (fake HTTP and IMAP underneath):
+    ESP32 reading in -> Open-Meteo forecast + mailbox reminder -> Plant Doctor -> MQTT out."""
+    settings = Settings(offline=True)
+    weather = OpenMeteoWeatherAgent(
+        "Colombo, LK", 6.9271, 79.8612, fetch=lambda url, params, timeout: open_meteo_response(code=0, hourly_temps=(34.0,), rain=(5,))
+    )
+    imap = FakeImap([make_email("Booking confirmed: Kandy trip", "Your trip starts this Friday (3 nights).")])
+    notifications = ImapNotificationAgent("imap.gmail.com", "plant.owner@gmail.com", "app-password", connect=imap)
+    client = FakeClient()
+    service = build_service(settings, None, weather, notifications)
+    bridge = Bridge(settings, service, WateringPolicy.from_settings(settings), client, clock=lambda: T0)
+
+    bridge.handle_message("greenpulse/greenpulse-01/sensors", sensors(50))
+    bridge.process_pending()
+
+    ai_input, care = client.published[0][1], client.published[1][1]
+    assert ai_input["weather"]["source"] == "open-meteo" and ai_input["weather"]["heat_alert"]
+    assert ai_input["notifications"]["source"] == "email"
+    assert [r["kind"] for r in ai_input["notifications"]["reminders"]] == ["travel"]
+    assert care["headline"] == "Water well before your trip"
 
 
 def test_switch_payloads():

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
@@ -53,6 +53,18 @@ class Settings:
     water_cooldown_s: int = 1800
     water_max_per_day: int = 6
 
+    # Weather Agent: the live Open-Meteo forecast for these coordinates (no API key). Default: Colombo.
+    # Keep them in step with `location`, which is only the name shown in the advice.
+    weather_latitude: float = 6.9271
+    weather_longitude: float = 79.8612
+
+    # Notification Agent: the mailbox it reads over IMAP. Not set = email not connected. For Gmail,
+    # use an app password (Google Account > Security > App passwords), never the account password.
+    email_address: str | None = None
+    email_app_password: str | None = field(default=None, repr=False)
+    email_imap_host: str = "imap.gmail.com"
+    email_folder: str = "INBOX"
+
     @classmethod
     def from_env(cls) -> Settings:
         load_dotenv()
@@ -81,4 +93,11 @@ class Settings:
             water_pulse_s=float(_optional("WATER_PULSE_S") or cls.water_pulse_s),
             water_cooldown_s=int(_optional("WATER_COOLDOWN_S") or cls.water_cooldown_s),
             water_max_per_day=int(_optional("WATER_MAX_PER_DAY") or cls.water_max_per_day),
+            weather_latitude=float(_optional("WEATHER_LATITUDE") or cls.weather_latitude),
+            weather_longitude=float(_optional("WEATHER_LONGITUDE") or cls.weather_longitude),
+            email_address=_optional("EMAIL_ADDRESS"),
+            # Gmail shows app passwords as "abcd efgh ijkl mnop"; the spaces are not part of it.
+            email_app_password=(_optional("EMAIL_APP_PASSWORD") or "").replace(" ", "") or None,
+            email_imap_host=_optional("EMAIL_IMAP_HOST") or cls.email_imap_host,
+            email_folder=_optional("EMAIL_FOLDER") or cls.email_folder,
         )

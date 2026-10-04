@@ -5,6 +5,7 @@
     python -m greenpulse_ai --all                    # every scenario, as a table
     python -m greenpulse_ai --simulate               # fake ESP32 streaming readings through the service
     python -m greenpulse_ai --offline                # rules only, never call the LLM
+    python -m greenpulse_ai --live-context           # dummy sensors + live weather forecast and real mailbox
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from .config import Settings
 from .dummy_data import DEFAULT_SCENARIO, SCENARIOS, Scenario, simulate_readings
 from .llm import PROVIDER_API_KEYS, create_chat_model
 from .mqtt_payloads import LED_COLOURS, Topics, build_messages
-from .orchestrator import build_pipeline, build_service
+from .orchestrator import build_pipeline, build_service, describe_context, live_context_agents
 from .plant_profiles import PROFILES, get_profile
 from .schemas import CareResult
 
@@ -56,14 +57,16 @@ def main(argv: list[str] | None = None) -> None:
     else:
         key_var = PROVIDER_API_KEYS.get(settings.llm_model.split(":", 1)[0], "the API key")
         mode = f"rules only (offline; set {key_var} in .env to use {settings.llm_model})"
-    print(f"GreenPulse Agentic AI Core | plant: {get_profile(settings.plant_profile).name} | mode: {mode}\n")
+    print(f"GreenPulse Agentic AI Core | plant: {get_profile(settings.plant_profile).name} | mode: {mode}")
+    context = live_context_agents(settings) if args.live_context else None
+    print(describe_context(settings) if context else "Weather and inbox: the scenario's dummy data", end="\n\n")
 
     if args.simulate:
-        _simulate(settings, llm, args.ticks, args.delay, args.analysis_interval)
+        _simulate(settings, llm, args.ticks, args.delay, args.analysis_interval, context)
     elif args.all:
-        _run_all(settings, llm)
+        _run_all(settings, llm, context)
     else:
-        result = _run_scenario(SCENARIOS[args.scenario], settings, llm)
+        result = _run_scenario(SCENARIOS[args.scenario], settings, llm, context)
         _print_result(SCENARIOS[args.scenario], result, Topics(settings.topic_prefix), args.json)
 
 
@@ -80,6 +83,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--plant", choices=PROFILES, help="plant profile (default: PLANT_PROFILE or pothos)")
     parser.add_argument("--offline", action="store_true", help="rule-based agents only; no LLM calls")
     parser.add_argument("--json", action="store_true", help="print the full MQTT payloads")
+    parser.add_argument(
+        "--live-context",
+        action="store_true",
+        help="use the live weather forecast and the mailbox from .env instead of the dummy weather and inbox",
+    )
     parser.add_argument("--ticks", type=int, default=48, help="simulate: readings to generate (10 simulated min each)")
     parser.add_argument("--delay", type=float, default=0.2, help="simulate: real seconds between readings")
     parser.add_argument(
@@ -89,31 +97,30 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _run_scenario(scenario: Scenario, settings: Settings, llm) -> CareResult:
-    pipeline = build_pipeline(
-        settings,
-        llm,
-        weather_agent=DummyWeatherAgent(scenario.weather, settings.location),
-        notification_agent=DummyNotificationAgent(scenario.messages),
+def _run_scenario(scenario: Scenario, settings: Settings, llm, context=None) -> CareResult:
+    weather, notifications = context or (
+        DummyWeatherAgent(scenario.weather, settings.location),
+        DummyNotificationAgent(scenario.messages),
     )
+    pipeline = build_pipeline(settings, llm, weather_agent=weather, notification_agent=notifications)
     readings = scenario.readings(settings.device_id)
     return pipeline.run(readings[-1], readings, trigger=f"scenario:{scenario.key}")
 
 
-def _run_all(settings: Settings, llm) -> None:
+def _run_all(settings: Settings, llm, context=None) -> None:
     print(f"{'scenario':<16}{'baseline':<10}{'final':<10}{'doctor':<16}headline")
     print("-" * 90)
     for scenario in SCENARIOS.values():
-        result = _run_scenario(scenario, settings, llm)
+        result = _run_scenario(scenario, settings, llm, context)
         print(
             f"{scenario.key:<16}{result.environment.baseline_priority:<10}{result.priority:<10}"
             f"{result.doctor_source:<16}{result.advice.headline}"
         )
 
 
-def _simulate(settings: Settings, llm, ticks: int, delay: float, analysis_interval: int) -> None:
+def _simulate(settings: Settings, llm, ticks: int, delay: float, analysis_interval: int, context=None) -> None:
     settings = dataclasses.replace(settings, analysis_interval_s=analysis_interval)
-    service = build_service(settings, llm)
+    service = build_service(settings, llm, *(context or ()))
     print(
         f"Fake ESP32 publishing one reading per 10 simulated minutes; the service re-analyses on the first reading, "
         f"every {analysis_interval // 60} simulated min, on a >= {settings.moisture_change_trigger:g}-point moisture "
