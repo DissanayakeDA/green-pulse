@@ -9,11 +9,10 @@ ESP32 ──MQTT/TLS──▶ AWS IoT Core ◀──MQTT/TLS── EC2: AI backe
                         └────────MQTT/TLS───── EC2: Node-RED dashboard ◀── your browser (port 1880)
 ```
 
-**Before you start:** AWS IoT Core must be set up as in
-[integration.md, section 7](integration.md#7-moving-to-aws-iot-core-final-setup): three Things
-(`greenpulse-01`, `greenpulse-backend`, `greenpulse-nodered`), each with its own certificate, and the
-policy attached. You need the backend's and Node-RED's certificate files and the IoT Core endpoint
-(AWS IoT console → **Settings** → *Device data endpoint*).
+**Before you start:** AWS IoT Core must be set up as in [aws-iot.md](aws-iot.md): three Things
+(`greenpulse-01`, `greenpulse-backend`, `greenpulse-nodered`), each with its own certificate and
+policy, and the data-log rule. You need the backend's and Node-RED's certificate files and the IoT
+Core endpoint (AWS IoT console → **Settings** → *Device data endpoint*).
 
 ## 1. Launch the EC2 instance
 
