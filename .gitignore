@@ -7,3 +7,9 @@ __pycache__/
 # ESP32 Wi-Fi password and AWS IoT certificates
 firmware/**/config.h
 backend/certs/
+
+# AWS IoT certificate downloads, wherever they are saved
+aws-endpoint/
+*.pem
+*.pem.crt
+*.pem.key

@@ -186,31 +186,16 @@ For a demo, set `WATER_COOLDOWN_S=60` in `.env` so you can show several pulses i
 
 ## 7. Moving to AWS IoT Core (final setup)
 
-Each client needs its own certificate and a **unique client ID**. Two connections with the same ID
-keep disconnecting each other.
+Follow [aws-iot.md](aws-iot.md), a step-by-step guide for the AWS console. It creates a Thing,
+certificate and least-privilege policy for each client, and an IoT rule that logs the readings,
+advice and pump events to DynamoDB. Each client needs its own certificate and a **unique client
+ID**. Two connections with the same ID keep disconnecting each other.
 
 | Client | Client ID / Thing | Configure in |
 |---|---|---|
 | ESP32 | `greenpulse-01` | `config.h`: `MQTT_USE_TLS 1`, endpoint, and paste the 3 PEMs |
 | AI backend | `greenpulse-backend` | `.env`: `MQTT_HOST`, `MQTT_PORT=8883`, `MQTT_CA_FILE`, `MQTT_CERT_FILE`, `MQTT_KEY_FILE` (put the files in `backend/certs/`, which is git-ignored) |
 | Node-RED | `greenpulse-nodered` | broker node: port 8883, **Use TLS** with the cert, key and CA |
-
-Attach a policy like this to all three certificates, with your region and account ID. Without
-`iot:RetainPublish`, the retained messages (priority, advice, status, auto switch) are rejected.
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    { "Effect": "Allow", "Action": "iot:Connect",
-      "Resource": "arn:aws:iot:REGION:ACCOUNT_ID:client/greenpulse-*" },
-    { "Effect": "Allow", "Action": ["iot:Publish", "iot:RetainPublish", "iot:Receive"],
-      "Resource": "arn:aws:iot:REGION:ACCOUNT_ID:topic/greenpulse/*" },
-    { "Effect": "Allow", "Action": "iot:Subscribe",
-      "Resource": "arn:aws:iot:REGION:ACCOUNT_ID:topicfilter/greenpulse/*" }
-  ]
-}
-```
 
 The Node-RED flow already subscribes with QoS 1. AWS IoT Core does not support QoS 2, which is
 Node-RED's default.
