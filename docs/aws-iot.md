@@ -119,7 +119,8 @@ message and the last will (`{"online": false}`) are retained.
 ```
 
 **`GreenPulseBackendPolicy`** (the AI backend). It reads every device's readings, pump state and
-auto switch, and publishes the advice, the LED priority and pump commands. In the `topic/`
+auto switch, and publishes the advice, the LED priority and pump commands. It also publishes the
+auto switch (retained) when it is flipped on the Next.js dashboard, which the bridge serves. In the `topic/`
 resources, `*` stands for any device ID. The `topicfilter/` resources contain a literal `+`
 instead: AWS compares a subscription's topic filter with the policy as text, and a `*` in the
 policy does not match the `+` in `greenpulse/+/sensors`.
@@ -158,7 +159,8 @@ policy does not match the `+` in `greenpulse/+/sensors`.
         "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/ai/input",
         "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/ai/care",
         "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/priority",
-        "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/pump/command"
+        "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/pump/command",
+        "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/pump/auto"
       ]
     },
     {
@@ -166,12 +168,21 @@ policy does not match the `+` in `greenpulse/+/sensors`.
       "Action": "iot:RetainPublish",
       "Resource": [
         "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/ai/care",
-        "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/priority"
+        "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/priority",
+        "arn:aws:iot:ap-south-1:ACCOUNT_ID:topic/greenpulse/*/pump/auto"
       ]
     }
   ]
 }
 ```
+
+If you created this policy before the Next.js dashboard was added, it lacks the two `pump/auto`
+lines, and AWS disconnects the backend as soon as someone flips the auto-watering switch on the
+Next.js dashboard. The backend then resends that unacknowledged message every time it reconnects, so
+it loops on "Connected" / "Disconnected (Unspecified error)" every second or two until the policy is
+fixed (no restart needed afterwards). To add them: **Security** → **Policies** → `GreenPulseBackendPolicy` → **Edit
+active version**, add the two lines as above, tick **Set the edited version as the active version**
+→ **Save as new version**. The change applies at once; the backend doesn't need a new certificate.
 
 **`GreenPulseDashboardPolicy`** (Node-RED). It reads everything under `greenpulse/` (the flow
 subscribes to `greenpulse/#` and to filters like `greenpulse/+/sensors`) and may only send pump
@@ -494,6 +505,7 @@ format the cell as a date and time.
 | Bridge: `FileNotFoundError` or an SSL error at start | A certificate path in `.env` is wrong; run the bridge from the `backend` folder |
 | Bridge: `MQTT connection refused` | Certificate inactive, or the policy not attached to the backend's certificate |
 | Retained messages missing after a restart | `iot:RetainPublish` missing from that client's policy |
+| Bridge disconnects when the auto-watering switch is flipped on the Next.js dashboard, then loops on connect / disconnect | `GreenPulseBackendPolicy` lacks `pump/auto` under `iot:Publish` and `iot:RetainPublish` (step 2) |
 | No items in DynamoDB | Look in `/greenpulse/iot-rule-errors`. Usually the key names don't match exactly (`topic` String, `ts` Number) or the rule is disabled |
 | `ai/input`, `priority` or `pump/auto` items in DynamoDB | The rule's SQL has no `WHERE` clause; use the statement in step 8 |
 | Everything is in the wrong region | Things, rules and tables only show in the region they were created in; switch the region top right |

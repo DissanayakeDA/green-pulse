@@ -2,10 +2,12 @@ import json
 
 from greenpulse_ai import Settings, build_service
 from greenpulse_ai.agents import ImapNotificationAgent, OpenMeteoWeatherAgent
+from greenpulse_ai.alerts import AlertCenter
 from greenpulse_ai.bridge import Bridge, _parse_switch, uses_tls
+from greenpulse_ai.mailer import HEADER, Mailer
 from greenpulse_ai.watering import WateringPolicy
 
-from conftest import T0, FakeImap, make_email, open_meteo_response
+from conftest import T0, FakeImap, FakeSmtp, make_email, open_meteo_response
 
 
 class FakeClient:
@@ -102,6 +104,41 @@ def test_manual_watering_reported_by_the_esp32_blocks_auto_watering():
     assert "soak" in client.published[1][1]["watering"]["reason"]
 
 
+def test_dashboard_water_now_sends_the_same_command_as_node_red():
+    bridge, client = make_bridge()
+    assert bridge.water_now("greenpulse-01") == 5.0
+    assert client.published == [
+        (
+            "greenpulse/greenpulse-01/pump/command",
+            {"action": "on", "duration_s": 5.0, "source": "manual", "reason": "Dashboard button"},
+            False,
+        )
+    ]
+
+
+def test_dashboard_switch_is_published_retained_and_applied():
+    bridge, client = make_bridge()
+    bridge.set_auto_watering("greenpulse-01", True)
+    assert client.published == [("greenpulse/greenpulse-01/pump/auto", True, True)]
+    assert bridge.policy.is_enabled("greenpulse-01")
+    bridge.handle_message("greenpulse/greenpulse-01/sensors", sensors(18))
+    bridge.process_pending()
+    assert client.topics()[-1] == "greenpulse/greenpulse-01/pump/command"  # auto-watering is really on
+
+
+def test_the_dashboard_store_follows_the_mqtt_traffic():
+    bridge, _ = make_bridge()
+    bridge.handle_message("greenpulse/greenpulse-01/sensors", sensors(18))
+    bridge.handle_message("greenpulse/greenpulse-01/pump/state", b'{"state": "on", "source": "manual", "duration_s": 5}')
+    bridge.process_pending()
+
+    snapshot = bridge.store.snapshot("greenpulse-01")
+    assert snapshot["online"] and snapshot["reading"]["soil_moisture"] == 18
+    assert snapshot["analysis"]["priority"] == "critical"
+    assert snapshot["watering"]["events"][0]["state"] == "on"
+    assert snapshot["watering"]["last_decision"]["reason"] == "Auto-watering is off"
+
+
 def test_bad_payloads_are_ignored():
     bridge, client = make_bridge()
     bridge.handle_message("greenpulse/greenpulse-01/sensors", b"not json")
@@ -148,6 +185,25 @@ def test_live_weather_and_email_reach_the_plant_doctor():
     assert ai_input["notifications"]["source"] == "email"
     assert [r["kind"] for r in ai_input["notifications"]["reminders"]] == ["travel"]
     assert care["headline"] == "Water well before your trip"
+
+
+def test_urgent_advice_is_emailed(tmp_path):
+    settings = Settings(offline=True)
+    smtp = FakeSmtp()
+    mailer = Mailer("smtppro.zoho.com", 465, "hello@kyndexlab.com", "app-password", connect=smtp)
+    bridge = Bridge(settings, build_service(settings, None), WateringPolicy.from_settings(settings), FakeClient(), clock=lambda: T0)
+    alerts = AlertCenter(mailer, bridge.store, tmp_path / "alerts.json", clock=lambda: T0)
+    bridge.alerts = alerts
+    owner = alerts.add("owner@example.com")
+    alerts.verify(owner["id"], smtp.sent[-1]["Subject"][:6])
+
+    bridge.handle_message("greenpulse/greenpulse-01/sensors", sensors(18))
+    bridge.process_pending()
+    alerts.send_pending()
+
+    alert = smtp.sent[-1]
+    assert alert[HEADER] == "alert" and alert["To"] == "owner@example.com"
+    assert "Pothos (Money Plant) (greenpulse-01) needs attention." in alert.get_body(("plain",)).get_content()
 
 
 def test_switch_payloads():

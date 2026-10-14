@@ -22,7 +22,8 @@ MQTT broker and exchange messages through topics:
 |---|---|---|
 | Firmware | `firmware/greenpulse_esp32/` | Arduino IDE → Upload |
 | AI backend | `backend/` | `python -m greenpulse_ai.bridge` |
-| Dashboard | `node-red/greenpulse-flow.json` | import into Node-RED |
+| Dashboard (technical) | `node-red/greenpulse-flow.json` | import into Node-RED |
+| Plant dashboard + chat | `dashboard/` (Next.js) | `npm run dev`; talks to the bridge's dashboard API, not to MQTT |
 
 The topic list and payloads are in [backend/README.md](../backend/README.md#mqtt-contract-proposed-karunarathna-to-finalise).
 
@@ -166,6 +167,23 @@ timestamps (the AI input and output payloads). The device ID
 (`greenpulse-01`) and the manual watering time (5 s) are environment variables on the flow tab: in
 the editor, double-click the tab to change them.
 
+### Plant dashboard and chat (Next.js)
+
+The Next.js dashboard is the owner's view: what to do now, the soil gauge, the readings against the
+plant's ranges, watering controls, history, and a chat for questions such as "How is my plant
+doing?". It reads from the dashboard API that the bridge serves on `http://127.0.0.1:8000`, so start
+the bridge first (section 4), then:
+
+```powershell
+cd dashboard
+npm install
+npm run dev              # http://localhost:3000
+```
+
+Both dashboards can be open at once. They send the same pump commands, and the auto-watering switch
+stays in step on both. To try the dashboard without the ESP32 or a broker, run the bridge with
+`--demo` instead. Details: [dashboard/README.md](../dashboard/README.md).
+
 ## 6. Test it end to end
 
 1. The Serial Monitor shows `MQTT ... connected`, and the dashboard shows **ESP32: Online**.
@@ -181,6 +199,10 @@ the editor, double-click the tab to change them.
 5. **Auto-watering:** pull the soil probe out of the soil so it reads dry, then turn on
    **Auto-watering (AI)**. The next reading is analysed at once, and the pump pulses within about
    10 s. The advice card explains the decision. With the probe back in wet soil, the pump stays off.
+
+6. **Plant dashboard:** open <http://localhost:3000>. The headline matches the advice card in
+   Node-RED and the lamp matches the LED. Ask "When was it last watered?" in the chat; the answer
+   names the run from step 4, and the line under it shows it looked at the watering log.
 
 For a demo, set `WATER_COOLDOWN_S=60` in `.env` so you can show several pulses in a row.
 
@@ -220,3 +242,5 @@ To run the backend and Node-RED on an EC2 server instead of the laptop, see
 | Bridge log: `Mailbox folder ... not found` | `EMAIL_FOLDER` doesn't match a Gmail label exactly (labels are case-sensitive) |
 | Email reminder not listed | It is older than 7 days, has no plant-care or travel keyword, or the 10-minute mailbox cache hasn't expired yet |
 | MQTT nodes show "disconnected" in Node-RED | Wrong broker settings in the "GreenPulse broker" node |
+| Plant dashboard: "Can't reach the GreenPulse server" | The bridge isn't running, was started with `--no-api`, or port 8000 is taken (the bridge logs an error at start) |
+| Chat answers say "Quick answer" | No LLM key in `backend/.env`, `--offline`, or the LLM call failed (the bridge log shows why) |

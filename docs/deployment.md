@@ -1,11 +1,13 @@
 # Deploying GreenPulse to the cloud (AWS EC2 + AWS IoT Core)
 
 In the final setup, the laptop is no longer needed. The ESP32, the AI backend and Node-RED all
-connect to AWS IoT Core, and the backend and Node-RED run on one EC2 instance:
+connect to AWS IoT Core, and the backend, Node-RED and the Next.js plant dashboard run on one EC2
+instance:
 
 ```
 ESP32 ──MQTT/TLS──▶ AWS IoT Core ◀──MQTT/TLS── EC2: AI backend (bridge) ──▶ Groq LLM, Open-Meteo, Gmail
-                        ▲
+                        ▲                          ▲ dashboard API (127.0.0.1:8000, server only)
+                        │                          └── EC2: Next.js plant dashboard ◀── your browser (port 3000)
                         └────────MQTT/TLS───── EC2: Node-RED dashboard ◀── your browser (port 1880)
 ```
 
@@ -25,13 +27,15 @@ In the EC2 console, choose **Launch instance**:
 | Instance type | `t3.micro` is enough for the bridge and Node-RED; `t3.small` if it feels slow |
 | Key pair | Create one (e.g. `greenpulse`) and keep the downloaded `.pem` file safe |
 | Storage | 16 GB gp3 |
-| Security group, inbound | SSH (22) from **My IP**; Custom TCP 1880 from **My IP** (Node-RED) |
+| Security group, inbound | SSH (22) from **My IP**; Custom TCP 1880 from **My IP** (Node-RED); Custom TCP 3000 from **My IP** (plant dashboard) |
 
 Leave outbound traffic open (the default). The backend connects out to IoT Core (8883), Groq and
-Open-Meteo (443) and Gmail (993); nothing needs to connect in except you.
+Open-Meteo (443), the mailbox (IMAP 993) and, for email alerts, its SMTP server (465); nothing needs
+to connect in except you.
 
-Never open port 1880 to `0.0.0.0/0`. When your IP changes (different Wi-Fi, a demo room), update
-the rule instead.
+Never open ports 1880 or 3000 to `0.0.0.0/0`: both dashboards can run the pump, and every chat
+question costs an LLM call. When your IP changes (different Wi-Fi, a demo room), update the rules
+instead. Port 8000 (the dashboard API) needs no rule: it only listens on the server itself.
 
 ## 2. Install the AI backend
 
@@ -68,6 +72,9 @@ MQTT_KEY_FILE=certs/backend-private.pem.key
 MQTT_CLIENT_ID=greenpulse-backend
 EMAIL_ADDRESS=...                      # optional, see backend/README.md
 EMAIL_APP_PASSWORD=...
+EMAIL_IMAP_HOST=imappro.zoho.com       # only for Zoho; Gmail is the default
+SMTP_HOST=smtppro.zoho.com             # optional: email alerts (smtp.gmail.com for Gmail)
+DASHBOARD_URL=http://<public-ip>:3000  # optional: the link in the emails
 ```
 
 Then lock the secrets down and run the bridge once in the foreground:
@@ -122,13 +129,40 @@ sudo systemctl enable --now nodered.service
 4. Click **Update**, **Update**, then **Deploy**. The MQTT nodes should show *connected*.
 5. Open the dashboard at `http://<public-ip>:1880/dashboard/greenpulse`.
 
-## 6. Final integration test
+## 6. Run the plant dashboard (Next.js)
+
+Node.js is already installed (the Node-RED installer added it). Build the dashboard and run it as a
+service:
+
+```bash
+cd ~/green-pulse/dashboard
+npm ci
+npm run build
+sudo cp ~/green-pulse/deploy/greenpulse-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now greenpulse-dashboard
+systemctl status greenpulse-dashboard        # should say "active (running)"
+```
+
+Open `http://<public-ip>:3000`. It reads from the bridge's dashboard API on `127.0.0.1:8000`, so
+the bridge must be running too. If `npm run build` is killed on a `t3.micro` (out of memory), add
+a swap file once and build again:
+
+```bash
+sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+The auto-watering switch on this dashboard makes the backend publish `pump/auto`, so the backend's
+IoT policy must allow it ([aws-iot.md](aws-iot.md), `GreenPulseBackendPolicy`).
+
+## 7. Final integration test
 
 With the ESP32 on AWS IoT Core (`MQTT_USE_TLS 1` in `config.h`) and powered:
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | `systemctl status greenpulse-bridge nodered` | Both `active (running)` |
+| 1 | `systemctl status greenpulse-bridge nodered greenpulse-dashboard` | All three `active (running)` |
 | 2 | AWS IoT console → **MQTT test client** → subscribe to `greenpulse/#` | A `sensors` message every 10 s, plus `ai/input`, `ai/care` and `priority` after each analysis |
 | 3 | `journalctl -u greenpulse-bridge -f` | One line per reading and an analysis line with `llm via groq:...` |
 | 4 | Dashboard, top row | Gauges move, **ESP32: Online**, the advice card fills in |
@@ -138,6 +172,8 @@ With the ESP32 on AWS IoT Core (`MQTT_USE_TLS 1` in `config.h`) and powered:
 | 8 | **Water now**, then **Auto-watering** with the probe out of the soil | As in [integration.md, section 6](integration.md#6-test-it-end-to-end) |
 | 9 | Unplug the ESP32 | Dashboard shows **ESP32: Offline** within about a minute (MQTT last will) |
 | 10 | `sudo reboot`, wait 2 minutes, reload the dashboard | Everything comes back by itself; the last advice is still shown (retained) |
+| 11 | `http://<public-ip>:3000`, ask "How is my plant doing?" | The headline and lamp match Node-RED's advice card; the chat answers within a few seconds and says what it looked at |
+| 12 | Flip auto-watering on the plant dashboard | The Node-RED switch follows within a second, and the bridge stays connected |
 
 Note the results (with screenshots) for the final report.
 
@@ -149,6 +185,7 @@ To deploy a new version:
 cd ~/green-pulse && git pull
 backend/.venv/bin/pip install -r backend/requirements.txt
 sudo systemctl restart greenpulse-bridge
+(cd dashboard && npm ci && npm run build) && sudo systemctl restart greenpulse-dashboard
 ```
 
 If the flow changed, import it again in Node-RED (choose **Replace** for the existing nodes) and
@@ -168,3 +205,5 @@ the **My IP** rules if your own IP changed. The services start by themselves.
 | Dashboard doesn't load | Port 1880 not allowed from your current IP, or `nodered` service not running |
 | Node-RED MQTT nodes stay *connecting* | TLS configuration missing a file, or the policy doesn't allow `greenpulse-nodered` |
 | Retained messages missing after a restart | The policy lacks `iot:RetainPublish` |
+| Plant dashboard: "Can't reach the GreenPulse server" | `greenpulse-bridge` not running, or another process holds port 8000 (`sudo ss -ltnp \| grep 8000`) |
+| Plant dashboard doesn't load | Port 3000 not allowed from your current IP, or `greenpulse-dashboard` not running (`journalctl -u greenpulse-dashboard`) |

@@ -50,16 +50,22 @@ class PlantDoctorAgent:
         self._chain = (PLANT_DOCTOR_PROMPT | llm.with_structured_output(CareAdvice)) if llm else None
 
     def run(
-        self, environment: EnvironmentReport, weather: WeatherReport, notifications: NotificationReport
+        self,
+        environment: EnvironmentReport,
+        weather: WeatherReport,
+        notifications: NotificationReport,
+        profile: PlantProfile | None = None,
     ) -> Diagnosis:
+        """`profile` is the plant this device watches; without it, the agent's default plant."""
+        profile = profile or self.profile
         if self._chain is None:
             return Diagnosis(rule_based_advice(environment, weather, notifications), "rules")
         try:
             advice: CareAdvice = self._chain.invoke(
                 {
                     "baseline_priority": environment.baseline_priority,
-                    "plant_name": self.profile.name,
-                    "care_notes": self.profile.care_notes,
+                    "plant_name": profile.name,
+                    "care_notes": profile.care_notes,
                     "environment": environment.model_dump_json(indent=2, exclude={"agent"}),
                     "weather": weather.model_dump_json(indent=2, exclude={"agent"}),
                     "notifications": notifications.model_dump_json(indent=2, exclude={"agent"}),

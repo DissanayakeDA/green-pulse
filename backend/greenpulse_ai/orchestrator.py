@@ -27,7 +27,7 @@ from .agents.notification import DummyNotificationAgent, ImapNotificationAgent, 
 from .agents.plant_doctor import PlantDoctorAgent
 from .agents.weather import DummyWeatherAgent, OpenMeteoWeatherAgent, WeatherAgent
 from .config import Settings
-from .plant_profiles import get_profile
+from .plant_profiles import PlantProfile, get_profile
 from .schemas import CareResult, NotificationReport, SensorReading, WeatherReport
 
 log = logging.getLogger(__name__)
@@ -50,11 +50,18 @@ class PlantDoctorPipeline:
         self.doctor = doctor
         self.model = model
 
-    def run(self, reading: SensorReading, history: Sequence[SensorReading] = (), trigger: str = "manual") -> CareResult:
+    def run(
+        self,
+        reading: SensorReading,
+        history: Sequence[SensorReading] = (),
+        trigger: str = "manual",
+        profile: PlantProfile | None = None,
+    ) -> CareResult:
+        """`profile` is the plant this device watches; without it, the agents' default plant."""
         started = time.perf_counter()
         # The three analysis agents are independent (and mostly waiting on network I/O), so run them in parallel.
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix="agent") as pool:
-            environment_future = pool.submit(self.environment.run, reading, history)
+            environment_future = pool.submit(self.environment.run, reading, history, profile)
             weather_future = pool.submit(self.weather.run)
             notifications_future = pool.submit(self.notifications.run)
 
@@ -68,7 +75,7 @@ class PlantDoctorPipeline:
                 lambda: NotificationReport(source="unavailable", summary="Notifications are unavailable."),
             )
 
-        diagnosis = self.doctor.run(environment, weather, notifications)
+        diagnosis = self.doctor.run(environment, weather, notifications, profile)
         return CareResult(
             device_id=reading.device_id,
             generated_at=datetime.now(timezone.utc),
@@ -103,32 +110,46 @@ class PlantCareService:
         analysis_interval_s: int = 300,
         moisture_change_trigger: float = 5.0,
         history_size: int = 720,
+        profile_for: Callable[[str], PlantProfile] | None = None,
     ):
         self.pipeline = pipeline
         self.analysis_interval_s = analysis_interval_s
         self.moisture_change_trigger = moisture_change_trigger
+        # Which plant each device watches (plant_library.PlantLibrary.profile_for); default: the agents' plant.
+        self.profile_for = profile_for or (lambda device_id: pipeline.environment.profile)
         self._history: dict[str, deque[SensorReading]] = defaultdict(lambda: deque(maxlen=history_size))
         self._last_result: dict[str, CareResult] = {}
+        self._last_profile: dict[str, PlantProfile] = {}
 
     def handle_reading(self, reading: SensorReading, force: bool = False) -> CareResult | None:
         history = self._history[reading.device_id]
         history.append(reading)
-        trigger = "forced" if force else self._analysis_trigger(reading, list(history))
+        profile = self.profile_for(reading.device_id)
+        trigger = "forced" if force else self._analysis_trigger(reading, list(history), profile)
         if trigger is None:
             return None
 
         log.info("Running Plant Doctor for %s (%s)", reading.device_id, trigger)
-        result = self.pipeline.run(reading, list(history), trigger=trigger)
+        result = self.pipeline.run(reading, list(history), trigger=trigger, profile=profile)
         self._last_result[reading.device_id] = result
+        self._last_profile[reading.device_id] = profile
         return result
 
     def last_result(self, device_id: str) -> CareResult | None:
         return self._last_result.get(device_id)
 
-    def _analysis_trigger(self, reading: SensorReading, history: list[SensorReading]) -> str | None:
+    def preload(self, readings: Sequence[SensorReading]) -> None:
+        """Add past readings to the history without analysing them (demo mode's simulated past day), so
+        the first analysis already knows the moisture trend."""
+        for reading in readings:
+            self._history[reading.device_id].append(reading)
+
+    def _analysis_trigger(self, reading: SensorReading, history: list[SensorReading], profile: PlantProfile) -> str | None:
         last = self._last_result.get(reading.device_id)
         if last is None:
             return "first reading"
+        if self._last_profile.get(reading.device_id) != profile:  # another plant, or its ranges were edited
+            return "plant profile changed"
         # Reading timestamps (not wall-clock time) keep this deterministic for replayed or simulated data.
         if (reading.timestamp - last.reading.timestamp).total_seconds() >= self.analysis_interval_s:
             return "interval elapsed"
@@ -138,7 +159,7 @@ class PlantCareService:
             and abs(reading.soil_moisture - last.reading.soil_moisture) >= self.moisture_change_trigger
         ):
             return "moisture changed"
-        baseline = self.pipeline.environment.evaluate(reading, history).baseline_priority
+        baseline = self.pipeline.environment.evaluate(reading, history, profile).baseline_priority
         if baseline != last.environment.baseline_priority:
             return "sensor priority changed"
         return None
@@ -194,6 +215,10 @@ def build_service(
     llm: BaseChatModel | None,
     weather_agent: WeatherAgent | None = None,
     notification_agent: NotificationAgent | None = None,
+    profile_for: Callable[[str], PlantProfile] | None = None,
 ) -> PlantCareService:
+    """`profile_for` picks each device's plant (PlantLibrary.profile_for); without it, PLANT_PROFILE for all."""
     pipeline = build_pipeline(settings, llm, weather_agent, notification_agent)
-    return PlantCareService(pipeline, settings.analysis_interval_s, settings.moisture_change_trigger)
+    return PlantCareService(
+        pipeline, settings.analysis_interval_s, settings.moisture_change_trigger, profile_for=profile_for
+    )

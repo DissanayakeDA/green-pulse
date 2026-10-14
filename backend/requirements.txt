@@ -4,6 +4,10 @@ langchain-groq>=1.1,<2
 paho-mqtt>=2.1,<3
 python-dotenv>=1.0
 pydantic>=2.7,<3
+fastapi>=0.115,<1        # dashboard API for the Next.js dashboard
+uvicorn>=0.30,<1
+tzdata                   # time zones for the chat answers (Windows has no system time-zone database)
 
 # tests
 pytest>=8
+httpx                    # FastAPI's TestClient

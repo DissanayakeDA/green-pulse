@@ -1,0 +1,64 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+export async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    cache: "no-store",
+    ...init,
+    headers: init?.body ? { "content-type": "application/json" } : undefined,
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = body?.detail;
+    throw new Error(typeof detail === "string" ? detail : `The server answered ${response.status}.`);
+  }
+  return body as T;
+}
+
+/** Fetch `url` now and every `intervalMs` (slower while the tab is hidden). The last good data stays
+ * on screen while a new URL loads, so charts keep their frame instead of flashing empty. */
+export function usePolling<T>(url: string | null, intervalMs: number) {
+  const [data, setData] = useState<T | null>(null);
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const body = await api<T>(url);
+        if (!cancelled) {
+          setData(body);
+          setLoadedUrl(url);
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) timer = setTimeout(load, document.hidden ? intervalMs * 4 : intervalMs);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [url, intervalMs, nonce]);
+
+  const refresh = useCallback(() => setNonce((n) => n + 1), []);
+  return { data, error, refresh, stale: url !== loadedUrl };
+}
+
+/** The current time, updated every `intervalMs`, for "8 s ago" labels. */
+export function useNow(intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}

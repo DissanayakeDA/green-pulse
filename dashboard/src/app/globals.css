@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+/* GreenPulse admin theme: light surfaces, green brand. Status colours match the device's RGB LED. */
+:root {
+  color-scheme: light;
+  --page: #f4f7f5;
+  --surface: #ffffff;
+  --sunk: #f6f8f7;
+  --hover: #f0f5f2;
+  --ink: #16271d;
+  --ink-2: #4a5a51;
+  --ink-3: #85938b;
+  --line: #e3e9e5;
+  --line-strong: #cdd7d0;
+
+  --brand: #1f8a4c;
+  --brand-strong: #17703c;
+  --brand-ink: #166534;
+  --brand-soft: #e5f3e9;
+  --brand-softer: #f1f8f3;
+
+  --soil: #1f8a4c; /* soil-moisture series */
+  --temperature: #e8772e;
+  --humidity: #2b8fbf;
+  --water: #2a78d6; /* waterings */
+
+  --leaf: #2f8a4f;
+  --leaf-vein: #b5dc94;
+  --soil-dry: #e6dac4;
+  --soil-wet: #6b4f3a;
+  --soil-grain: #3b2c20;
+
+  --good: #16a34a;
+  --warning: #f2a516;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --good-bg: #e6f5ea;
+  --good-ink: #146c2e;
+  --warning-bg: #fdf3dc;
+  --warning-ink: #8a5a00;
+  --serious-bg: #fdebe2;
+  --serious-ink: #a84a1f;
+  --critical-bg: #fce8e8;
+  --critical-ink: #b42f2f;
+  --info-bg: #e8f1fc;
+  --info-ink: #1c5cab;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-sunk: var(--sunk);
+  --color-hover: var(--hover);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-softer: var(--brand-softer);
+  --color-water: var(--water);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-good-bg: var(--good-bg);
+  --color-good-ink: var(--good-ink);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-ink: var(--warning-ink);
+  --color-serious-bg: var(--serious-bg);
+  --color-serious-ink: var(--serious-ink);
+  --color-critical-bg: var(--critical-bg);
+  --color-critical-ink: var(--critical-ink);
+  --color-info-bg: var(--info-bg);
+  --color-info-ink: var(--info-ink);
+  --font-sans: var(--font-jakarta), system-ui, sans-serif;
+  --shadow-card: 0 1px 2px rgb(22 39 29 / 0.04), 0 1px 3px rgb(22 39 29 / 0.03);
+}
+
+/* In the base layer, so utilities such as focus-visible:outline-none can still override them. */
+@layer base {
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+.display {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* The device's LED, mirrored on screen. */
+.lamp {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--lamp);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--lamp) 20%, transparent);
+}
+.lamp[data-priority="critical"] {
+  animation: lamp-pulse 1.6s ease-in-out infinite;
+}
+@keyframes lamp-pulse {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--lamp) 12%, transparent);
+  }
+}
+
+/* Soil gauge: the wet soil and the waterline glide to a new level, and the leaves droop as it dries. */
+.gauge-level,
+.gauge-leaf {
+  transition: transform 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.gauge-drop {
+  animation: drop 0.9s ease-in infinite;
+  opacity: 0;
+}
+@keyframes drop {
+  0% { transform: translateY(-14px); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: translateY(34px); opacity: 0; }
+}
+
+.thinking span {
+  animation: thinking 1.2s ease-in-out infinite;
+}
+.thinking span:nth-child(2) { animation-delay: 0.15s; }
+.thinking span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes thinking {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .gauge-drop { opacity: 1; }
+}
