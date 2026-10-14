@@ -8,7 +8,12 @@ import { ChatDrawer } from "./ChatDrawer";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
+// The sign-in pages stand alone: no sidebar, and no polling before anyone is signed in.
+const AUTH_PAGES = ["/login", "/register"];
+
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  if (AUTH_PAGES.includes(pathname)) return children;
   return (
     <DashboardProvider>
       <Shell>{children}</Shell>

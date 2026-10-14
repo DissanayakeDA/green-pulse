@@ -54,6 +54,18 @@ If the bridge's API runs somewhere else, copy `.env.example` to `.env.local` and
 For production: `npm run build`, then `npm run start` (see [docs/deployment.md](../docs/deployment.md)
 for the EC2 service).
 
+## Signing in
+
+Every page needs an account. **Register** asks for a name, email, password and the registration code
+(`REGISTRATION_CODE` in `backend/.env`, given to the people you trust); **Sign in** takes the email and
+password. Your name and a **Sign out** button are at the bottom of the sidebar. Signing out also clears
+this browser's saved chat.
+
+`src/proxy.ts` sends anyone without the session cookie to `/login` (and back to the page they wanted
+afterwards). That redirect is only for convenience: the bridge checks the session on every `/api` call,
+and a 401 from it also leads to `/login`. The cookie is set by the bridge and passed through by the
+`/api` route; it is `HttpOnly`, and `Secure` when the site is served over HTTPS.
+
 ## The chat
 
 Each question goes to the bridge's Chat Agent (`backend/greenpulse_ai/agents/chat.py`). The LLM
@@ -79,7 +91,8 @@ the emails (`backend/greenpulse_ai/alerts.py`; set `SMTP_HOST` in `backend/.env`
 ## Layout
 
 ```
-src/app/                          one folder per page (readings/, watering/, assistant/, plants/, plant/, alerts/; / is the overview)
+src/app/                          one folder per page (readings/, watering/, assistant/, plants/, plant/, alerts/, login/, register/; / is the overview)
+src/proxy.ts                      sends signed-out visitors to /login
 src/app/api/[...path]/route.ts    forwards /api/* to the bridge
 src/components/shell/             sidebar, top bar (device picker, live status, Ask AI), chat side panel
 src/components/views/             the content of each page
