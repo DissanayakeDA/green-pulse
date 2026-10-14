@@ -24,8 +24,14 @@
     DELETE /api/alerts/recipients/{id}         stop all emails to it
     POST   /api/alerts/recipients/{id}/test    send a test email
 
+    GET  /api/auth/me                          who is signed in (or null), and whether registration is open
+    POST /api/auth/register                    create an account with the registration code, and sign in
+    POST /api/auth/login                       sign in
+    POST /api/auth/logout                      sign out
+
 The bridge serves it on API_HOST:API_PORT (default 127.0.0.1:8000), next to the MQTT loop. It is
-meant to be reached only through the Next.js server, which proxies /api/* to it.
+meant to be reached only through the Next.js server, which proxies /api/* to it. With accounts (the
+bridge always passes them), everything except /api/auth/* needs the session cookie set at sign-in.
 """
 
 from __future__ import annotations
@@ -35,10 +41,11 @@ import threading
 from typing import Annotated, Literal, Protocol
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Path, Query, Request
+from fastapi import FastAPI, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .accounts import SESSION_COOKIE, SESSION_DAYS, Accounts, AccountsError
 from .agents.chat import ChatAgent, ChatAnswer, ChatTurn
 from .agents.profile import PlantProfileAgent, ProfileDraft
 from .alerts import AlertCenter, AlertsError
@@ -104,6 +111,18 @@ class RecipientPrefs(BaseModel):
     daily: bool
 
 
+class Registration(BaseModel):
+    name: str = Field(max_length=60)
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=200)
+    code: str = Field(max_length=100)
+
+
+class SignIn(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=200)
+
+
 def create_app(
     store: DeviceStore,
     chat: ChatAgent,
@@ -113,8 +132,19 @@ def create_app(
     plants: PlantLibrary | None = None,
     profile_agent: PlantProfileAgent | None = None,
     alerts: AlertCenter | None = None,
+    accounts: Accounts | None = None,
 ) -> FastAPI:
     app = FastAPI(title="GreenPulse dashboard API", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+    if accounts is not None:
+
+        @app.middleware("http")
+        async def require_sign_in(request: Request, call_next):
+            """Everything but /api/auth/* needs a signed-in session. Without accounts (tests) all is open."""
+            if not request.url.path.startswith("/api/auth/"):
+                if accounts.account_for(request.cookies.get(SESSION_COOKIE)) is None:
+                    return JSONResponse({"detail": "Sign in to use the GreenPulse dashboard."}, status_code=401)
+            return await call_next(request)
     plants = plants or PlantLibrary(default_key=store.profile_for(default_device).key)
     profile_agent = profile_agent or PlantProfileAgent()
 
@@ -250,6 +280,40 @@ def create_app(
         _alerts(alerts).send_test(recipient_id)
         return {"ok": True}
 
+    # ------------------------------------------------------------------ dashboard accounts
+    # Plain defs: password hashing is slow on purpose, so it runs in a worker thread.
+
+    @app.exception_handler(AccountsError)
+    def accounts_error(request: Request, exc: AccountsError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
+    @app.get("/api/auth/me")
+    def me(request: Request) -> dict:
+        account = accounts.account_for(request.cookies.get(SESSION_COOKIE)) if accounts else None
+        return {
+            "account": account.public() if account else None,
+            "registration_open": bool(accounts and accounts.registration_open),
+        }
+
+    @app.post("/api/auth/register", status_code=201)
+    def register(body: Registration, request: Request, response: Response) -> dict:
+        account, token = _accounts(accounts).register(body.name, body.email, body.password, body.code)
+        _set_session(response, request, token)
+        return {"account": account.public()}
+
+    @app.post("/api/auth/login")
+    def login(body: SignIn, request: Request, response: Response) -> dict:
+        account, token = _accounts(accounts).sign_in(body.email, body.password)
+        _set_session(response, request, token)
+        return {"account": account.public()}
+
+    @app.post("/api/auth/logout")
+    def logout(request: Request, response: Response) -> dict:
+        if accounts:
+            accounts.sign_out(request.cookies.get(SESSION_COOKIE))
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"ok": True}
+
     return app
 
 
@@ -263,6 +327,26 @@ def _alerts(alerts: AlertCenter | None) -> AlertCenter:
     if alerts is None:
         raise HTTPException(503, "Email alerts are not available")
     return alerts
+
+
+def _accounts(accounts: Accounts | None) -> Accounts:
+    if accounts is None:
+        raise HTTPException(503, "Dashboard accounts are not available")
+    return accounts
+
+
+def _set_session(response: Response, request: Request, token: str) -> None:
+    # Secure when the browser came in over HTTPS (Nginx sets X-Forwarded-Proto and Next.js passes it on);
+    # plain http://localhost while developing.
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=SESSION_DAYS * 24 * 3600,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=request.headers.get("x-forwarded-proto") == "https",
+    )
 
 
 def serve_in_background(app: FastAPI, host: str, port: int) -> threading.Thread:

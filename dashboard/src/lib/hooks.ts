@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { loginUrl } from "./auth";
 
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -10,8 +11,12 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {
+    // Signed out or the session ran out: sign in again, then come back here.
+    if (response.status === 401 && !url.startsWith("/api/auth/")) window.location.assign(loginUrl());
     const detail = body?.detail;
-    throw new Error(typeof detail === "string" ? detail : `The server answered ${response.status}.`);
+    if (typeof detail === "string") throw new Error(detail);
+    // 429 without a detail comes from Nginx's limit on sign-in attempts.
+    throw new Error(response.status === 429 ? "Too many attempts. Wait a minute and try again." : `The server answered ${response.status}.`);
   }
   return body as T;
 }

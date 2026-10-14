@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { DeviceSummary, History, Snapshot } from "./types";
+import { loginUrl, type Account, type Me } from "./auth";
 import { useChat, type Chat } from "./chat";
 import { usePolling } from "./hooks";
 
@@ -23,6 +24,8 @@ interface DashboardState {
   snapshot: Snapshot | null;
   history: History | null;
   health: Health | null;
+  /** who is signed in */
+  account: Account | null;
   error: string | null;
   refresh: () => void;
   chat: Chat;
@@ -53,8 +56,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const snapshot = usePolling<Snapshot>(base, 5_000);
   const history = usePolling<History>(base && `${base}/history?hours=24`, 60_000);
   const health = usePolling<Health>("/api/health", 60_000);
+  const me = usePolling<Me>("/api/auth/me", 300_000);
   const chat = useChat(deviceId);
   const [chatOpen, setChatOpen] = useState(false);
+
+  useEffect(() => {
+    if (me.data && !me.data.account) window.location.assign(loginUrl()); // the session ran out
+  }, [me.data]);
 
   const selectDevice = useCallback((id: string) => {
     setChosen(id);
@@ -82,6 +90,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         snapshot: snapshot.data,
         history: history.data,
         health: health.data,
+        account: me.data?.account ?? null,
         error: devices.error ?? snapshot.error,
         refresh,
         chat,

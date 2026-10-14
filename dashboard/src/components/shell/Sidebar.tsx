@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { X } from "lucide-react";
+import { LogOut, X } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { plantName } from "@/lib/format";
 import { useDashboard } from "@/lib/dashboard";
+import { signOut } from "@/lib/auth";
 import { Badge } from "../ui/Badge";
 
 export function Logo() {
@@ -26,7 +27,7 @@ export function Logo() {
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname();
-  const { snapshot, deviceId, health } = useDashboard();
+  const { snapshot, deviceId, health, account } = useDashboard();
   const plant = snapshot ? plantName(snapshot.plant) : null;
 
   return (
@@ -88,7 +89,33 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             </p>
           )}
         </div>
+
+        {account && (
+          <div className="flex items-center gap-3 border-t border-line px-4 py-3">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-bold text-brand-ink" aria-hidden>
+              {initials(account.name)}
+            </span>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-sm font-semibold text-ink">{account.name}</p>
+              <p className="truncate text-xs text-ink-3">{account.email}</p>
+            </div>
+            <button
+              type="button"
+              onClick={signOut}
+              title="Sign out"
+              className="rounded-md p-1.5 text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+            >
+              <LogOut className="size-4" aria-hidden />
+              <span className="sr-only">Sign out</span>
+            </button>
+          </div>
+        )}
       </aside>
     </>
   );
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?";
 }

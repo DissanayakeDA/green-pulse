@@ -13,21 +13,28 @@ async function forward(request: Request, { params }: { params: Promise<{ path: s
   const search = new URL(request.url).search;
   const target = new URL(`/api/${path.map(encodeURIComponent).join("/")}${search}`, API_URL);
   const hasBody = request.method === "POST" || request.method === "PUT";
+  // The session cookie goes to the bridge, which checks it; X-Forwarded-Proto (from Nginx) tells it to mark
+  // the cookie Secure.
+  const headers = new Headers();
+  if (hasBody) headers.set("content-type", "application/json");
+  for (const name of ["cookie", "x-forwarded-proto"]) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
   try {
     const response = await fetch(target, {
       method: request.method,
-      headers: hasBody ? { "content-type": "application/json" } : undefined,
+      headers,
       body: hasBody ? await request.text() : undefined,
       cache: "no-store",
       signal: AbortSignal.timeout(120_000), // a chat answer can take a few LLM calls
     });
-    return new Response(response.body, {
-      status: response.status,
-      headers: {
-        "content-type": response.headers.get("content-type") ?? "application/json",
-        "cache-control": "no-store",
-      },
+    const out = new Headers({
+      "content-type": response.headers.get("content-type") ?? "application/json",
+      "cache-control": "no-store",
     });
+    for (const cookie of response.headers.getSetCookie()) out.append("set-cookie", cookie); // sign in / out
+    return new Response(response.body, { status: response.status, headers: out });
   } catch {
     return Response.json(
       { detail: "The GreenPulse server can't be reached. Check that the bridge is running." },

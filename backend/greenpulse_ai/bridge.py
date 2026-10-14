@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
+from .accounts import Accounts
 from .agents.chat import ChatAgent
 from .agents.profile import PlantProfileAgent
 from .alerts import AlertCenter
@@ -255,6 +256,14 @@ def describe_alerts(alerts: AlertCenter) -> str:
     )
 
 
+def describe_accounts(accounts: Accounts) -> str:
+    count = accounts.count()
+    sign_in = f"Dashboard sign-in: {count} account{'' if count == 1 else 's'}"
+    if accounts.registration_open:
+        return f"{sign_in}; registration open to anyone with REGISTRATION_CODE"
+    return f"{sign_in}; registration closed (set REGISTRATION_CODE in .env to open it)"
+
+
 def _fmt(value: float | None, unit: str) -> str:
     return "--" if value is None else f"{value:g}{unit}"
 
@@ -322,6 +331,7 @@ def main(argv: list[str] | None = None) -> None:
         broker = f"simulated ESP32 {settings.device_id} (demo, no broker)"
     else:
         broker = f"{settings.mqtt_host}:{settings.mqtt_port}{' (TLS)' if uses_tls(settings) else ''}"
+    accounts = Accounts(settings.users_file, settings.registration_code)
     if args.no_api:
         api = "dashboard API off"
     else:
@@ -336,7 +346,7 @@ def main(argv: list[str] | None = None) -> None:
             },
         }
         profile_agent = PlantProfileAgent(llm, settings.llm_model, settings.location)
-        app = create_app(store, chat, bridge, settings.device_id, info, plants, profile_agent, alerts)
+        app = create_app(store, chat, bridge, settings.device_id, info, plants, profile_agent, alerts, accounts)
         serve_in_background(app, settings.api_host, settings.api_port)
         api = f"dashboard API on http://{settings.api_host}:{settings.api_port}"
     print(
@@ -346,6 +356,7 @@ def main(argv: list[str] | None = None) -> None:
         f"auto-watering: {'on' if settings.auto_watering else 'off'} until the dashboard switch says otherwise\n"
         f"{describe_context(settings)}\n"
         f"{describe_alerts(alerts)}\n"
+        f"{describe_accounts(accounts)}\n"
         f"Listening on {bridge.topics.sensors('+')}; {api}. Ctrl+C to stop.\n",
         flush=True,
     )
