@@ -211,17 +211,21 @@ server forwards `/api/*` to it, so it stays on localhost. Interactive docs: <htt
 | `PUT /api/alerts/recipients/{id}`, `DELETE ...` | `{"alerts": true, "min_priority": "high", "daily": true}`; remove the address |
 | `POST /api/alerts/recipients/{id}/test` | send a test email to a confirmed address |
 | `GET /api/auth/me` | `{"account": {...} or null, "registration_open": true}` |
-| `POST /api/auth/register` | `{"name", "email", "password", "code"}`: create an account with `REGISTRATION_CODE` and sign in |
-| `POST /api/auth/login`, `POST /api/auth/logout` | `{"email", "password"}` to sign in; sign out |
+| `POST /api/auth/register` | `{"name", "email", "password"}`: create an account and email it a 6-digit code |
+| `POST /api/auth/confirm`, `POST /api/auth/code` | `{"email", "code"}`: confirm the address and sign in; `{"email"}`: send a new code |
+| `POST /api/auth/login`, `POST /api/auth/logout` | `{"email", "password"}` to sign in (403 with `"reason": "unconfirmed"` until confirmed); sign out |
 
 Readings, advice and history start empty after a restart; the DynamoDB log is the long-term record.
 
 **Sign-in** (`accounts.py`). Everything except `/api/auth/*` answers 401 without the `gp_session`
-cookie that signing in sets. Anyone who knows `REGISTRATION_CODE` can create an account on the
-dashboard's Register page; with no code set, registration is closed. Accounts and sessions are saved to
-`USERS_FILE` (`data/users.json`, git-ignored): passwords as scrypt hashes, sessions as SHA-256 hashes of
-their tokens. Sessions last 30 days. Five wrong passwords in a row lock an account for 5 minutes. Every
-account can do everything; to remove one, delete it from the file and restart the bridge.
+cookie that signing in sets. Anyone can create an account on the dashboard's Register page; it works
+once its owner enters the 6-digit code emailed to the address (sent with the email-alert settings, so
+registration needs `SMTP_HOST`; without it, registration is closed). Codes last 15 minutes and allow 5
+tries; a new one can be sent every 60 s, and at most 20 go out per hour in all, so the server can't be
+used to email strangers. Accounts and sessions are saved to `USERS_FILE` (`data/users.json`,
+git-ignored): passwords as scrypt hashes, codes and sessions as SHA-256 hashes. Sessions last 30 days.
+Five wrong passwords in a row lock an account for 5 minutes. Unconfirmed addresses are forgotten after
+a day. Every account can do everything; to remove one, delete it from the file and restart the bridge.
 
 **Chat Agent** (`agents/chat.py`). For each question the LLM gets the plant, the location, the local
 time (`TIMEZONE`) and four tools:
@@ -319,7 +323,7 @@ greenpulse_ai/
   device_state.py          what the dashboard shows: recent readings, last result, pump events
   api.py                   dashboard API (FastAPI) for the Next.js dashboard, served by the bridge
   alerts.py                email alerts, offline notices and daily summaries; the sign-up list (ALERTS_FILE)
-  accounts.py              dashboard sign-in: registration code, password hashes, sessions (USERS_FILE)
+  accounts.py              dashboard sign-in: accounts confirmed by email code, password hashes, sessions (USERS_FILE)
   email_templates.py       the text and HTML of every email
   mailer.py                SMTP sending (SMTP_HOST)
   demo.py                  simulated ESP32 for --demo

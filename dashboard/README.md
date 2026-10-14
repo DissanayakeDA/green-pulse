@@ -56,10 +56,12 @@ for the EC2 service).
 
 ## Signing in
 
-Every page needs an account. **Register** asks for a name, email, password and the registration code
-(`REGISTRATION_CODE` in `backend/.env`, given to the people you trust); **Sign in** takes the email and
-password. Your name and a **Sign out** button are at the bottom of the sidebar. Signing out also clears
-this browser's saved chat.
+Every page needs an account. **Register** asks for a name, email and password, then emails a 6-digit
+code; entering it confirms the address and signs you in (**Send a new code** if it doesn't arrive).
+**Sign in** takes the email and password; an account that was never confirmed is asked for its code
+first. Your name and a **Sign out** button are at the bottom of the sidebar. Signing out also clears
+this browser's saved chat. Registering needs the bridge to be able to send email (`SMTP_HOST` in
+`backend/.env`).
 
 `src/proxy.ts` sends anyone without the session cookie to `/login` (and back to the page they wanted
 afterwards). That redirect is only for convenience: the bridge checks the session on every `/api` call,

@@ -25,8 +25,10 @@
     POST   /api/alerts/recipients/{id}/test    send a test email
 
     GET  /api/auth/me                          who is signed in (or null), and whether registration is open
-    POST /api/auth/register                    create an account with the registration code, and sign in
-    POST /api/auth/login                       sign in
+    POST /api/auth/register                    create an account; a 6-digit code is emailed to the address
+    POST /api/auth/confirm                     confirm the address with that code, and sign in
+    POST /api/auth/code                        email a new code
+    POST /api/auth/login                       sign in (a confirmed account)
     POST /api/auth/logout                      sign out
 
 The bridge serves it on API_HOST:API_PORT (default 127.0.0.1:8000), next to the MQTT loop. It is
@@ -115,7 +117,15 @@ class Registration(BaseModel):
     name: str = Field(max_length=60)
     email: str = Field(max_length=254)
     password: str = Field(max_length=200)
-    code: str = Field(max_length=100)
+
+
+class Confirmation(BaseModel):
+    email: str = Field(max_length=254)
+    code: str = Field(pattern=r"^\s*\d{6}\s*$")
+
+
+class EmailOnly(BaseModel):
+    email: str = Field(max_length=254)
 
 
 class SignIn(BaseModel):
@@ -145,6 +155,7 @@ def create_app(
                 if accounts.account_for(request.cookies.get(SESSION_COOKIE)) is None:
                     return JSONResponse({"detail": "Sign in to use the GreenPulse dashboard."}, status_code=401)
             return await call_next(request)
+
     plants = plants or PlantLibrary(default_key=store.profile_for(default_device).key)
     profile_agent = profile_agent or PlantProfileAgent()
 
@@ -285,7 +296,8 @@ def create_app(
 
     @app.exception_handler(AccountsError)
     def accounts_error(request: Request, exc: AccountsError) -> JSONResponse:
-        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+        body = {"detail": str(exc)} | ({"reason": exc.reason} if exc.reason else {})
+        return JSONResponse(body, status_code=exc.status)
 
     @app.get("/api/auth/me")
     def me(request: Request) -> dict:
@@ -296,10 +308,20 @@ def create_app(
         }
 
     @app.post("/api/auth/register", status_code=201)
-    def register(body: Registration, request: Request, response: Response) -> dict:
-        account, token = _accounts(accounts).register(body.name, body.email, body.password, body.code)
+    def register(body: Registration) -> dict:
+        account = _accounts(accounts).register(body.name, body.email, body.password)
+        return {"email": account.email}
+
+    @app.post("/api/auth/confirm")
+    def confirm(body: Confirmation, request: Request, response: Response) -> dict:
+        account, token = _accounts(accounts).confirm(body.email, body.code)
         _set_session(response, request, token)
         return {"account": account.public()}
+
+    @app.post("/api/auth/code")
+    def send_new_code(body: EmailOnly) -> dict:
+        _accounts(accounts).resend_code(body.email)
+        return {"ok": True}
 
     @app.post("/api/auth/login")
     def login(body: SignIn, request: Request, response: Response) -> dict:

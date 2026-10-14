@@ -260,8 +260,8 @@ def describe_accounts(accounts: Accounts) -> str:
     count = accounts.count()
     sign_in = f"Dashboard sign-in: {count} account{'' if count == 1 else 's'}"
     if accounts.registration_open:
-        return f"{sign_in}; registration open to anyone with REGISTRATION_CODE"
-    return f"{sign_in}; registration closed (set REGISTRATION_CODE in .env to open it)"
+        return f"{sign_in}; anyone can register with an email address they confirm"
+    return f"{sign_in}; registration closed (set SMTP_HOST in .env to send the confirmation codes)"
 
 
 def _fmt(value: float | None, unit: str) -> str:
@@ -316,8 +316,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.demo is not None:
         client = SimulatedEsp32(settings.device_id, settings.topic_prefix, soil=args.demo)
         service.preload(client.backfill(store))
+    mailer = Mailer.from_settings(settings)  # email alerts, and the codes that confirm new dashboard accounts
     alerts = AlertCenter(
-        Mailer.from_settings(settings),
+        mailer,
         store,
         settings.alerts_file,
         settings.timezone,
@@ -331,7 +332,7 @@ def main(argv: list[str] | None = None) -> None:
         broker = f"simulated ESP32 {settings.device_id} (demo, no broker)"
     else:
         broker = f"{settings.mqtt_host}:{settings.mqtt_port}{' (TLS)' if uses_tls(settings) else ''}"
-    accounts = Accounts(settings.users_file, settings.registration_code)
+    accounts = Accounts(settings.users_file, mailer)
     if args.no_api:
         api = "dashboard API off"
     else:

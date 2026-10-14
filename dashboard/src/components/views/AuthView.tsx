@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent, type InputHTMLAttributes, type ReactNode } from "react";
-import { LogIn, UserPlus } from "lucide-react";
-import { api } from "@/lib/hooks";
-import { nextPath, type Account, type Me } from "@/lib/auth";
+import { LogIn, MailCheck, UserPlus } from "lucide-react";
+import { ApiError, api } from "@/lib/hooks";
+import { nextPath, type Me } from "@/lib/auth";
 import { Logo } from "../shell/Sidebar";
 
 /** Who is signed in and whether registration is open. Someone already signed in goes straight on. */
@@ -18,26 +18,6 @@ function useMe(): Me | null {
   return me;
 }
 
-/** Sign-in or register, then a full page load so the dashboard starts fresh for this account. */
-function useSubmit(url: string, body: () => object) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api<{ account: Account }>(url, { method: "POST", body: JSON.stringify(body()) });
-      window.location.assign(nextPath());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setBusy(false);
-    }
-  }
-  return { busy, error, submit };
-}
-
 /** This page's ?next=…, to keep it when switching between sign-in and register. Read after the first
  * render, so the prerendered HTML and the browser agree. */
 function useQuery(): string {
@@ -46,12 +26,59 @@ function useQuery(): string {
   return query;
 }
 
+/** Runs one request at a time and keeps its error for the form. */
+function useAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return { busy, error, run };
+}
+
+function post(url: string, body: object) {
+  return api(url, { method: "POST", body: JSON.stringify(body) });
+}
+
 export function SignInView() {
   const me = useMe();
   const query = useQuery();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const { busy, error, submit } = useSubmit("/api/auth/login", () => ({ email: email.trim(), password }));
+  const [confirming, setConfirming] = useState(false);
+  const { busy, error, run } = useAction();
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    run(async () => {
+      try {
+        await post("/api/auth/login", { email: email.trim(), password });
+        window.location.assign(nextPath());
+      } catch (e) {
+        if (e instanceof ApiError && e.reason === "unconfirmed") setConfirming(true);
+        else throw e;
+      }
+    });
+  }
+
+  if (confirming) {
+    return (
+      <ConfirmStep
+        email={email.trim()}
+        note="Your email address isn't confirmed yet. Enter the code from the email we sent when you registered, or send a new one."
+        back={{ label: "Back to sign in", onClick: () => setConfirming(false) }}
+      />
+    );
+  }
 
   return (
     <AuthFrame
@@ -66,7 +93,7 @@ export function SignInView() {
             </Link>
           </>
         ) : me ? (
-          "Need an account? Ask the GreenPulse owner for access."
+          "Need an account? Ask the GreenPulse owner."
         ) : null
       }
     >
@@ -106,14 +133,29 @@ export function RegisterView() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
-  const { busy, error, submit } = useSubmit("/api/auth/register", () => ({ name: name.trim(), email: email.trim(), password, code }));
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const { busy, error, run } = useAction();
   const closed = me !== null && !me.registration_open;
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    run(async () => {
+      const registered = await api<{ email: string }>("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ name: name.trim(), email: email.trim(), password }),
+      });
+      setSentTo(registered.email);
+    });
+  }
+
+  if (sentTo) {
+    return <ConfirmStep email={sentTo} back={{ label: "Use a different email", onClick: () => setSentTo(null) }} />;
+  }
 
   return (
     <AuthFrame
       title="Create an account"
-      subtitle="You need the registration code from the GreenPulse owner."
+      subtitle="We'll email you a 6-digit code to confirm your address."
       footer={
         <>
           Already have an account?{" "}
@@ -125,7 +167,7 @@ export function RegisterView() {
     >
       {closed && (
         <p className="mb-4 rounded-lg bg-warning-bg px-3.5 py-3 text-sm text-warning-ink">
-          Registration is closed on this GreenPulse. Ask its owner to set a registration code.
+          Registration is closed: this GreenPulse can&apos;t send email yet. Ask its owner to set it up.
         </p>
       )}
       <form onSubmit={submit} className="space-y-4">
@@ -153,31 +195,104 @@ export function RegisterView() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-          <Field
-            id="code"
-            label="Registration code"
-            required
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={100}
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-          />
         </fieldset>
         <ErrorNote error={error} />
         <SubmitButton
           busy={busy}
-          disabled={closed || !name.trim() || !email.trim() || password.length < 8 || !code.trim()}
+          disabled={closed || !name.trim() || !email.trim() || password.length < 8}
           icon={<UserPlus className="size-4" aria-hidden />}
         >
-          {busy ? "Creating account…" : "Create account"}
+          {busy ? "Sending code…" : "Create account"}
         </SubmitButton>
       </form>
     </AuthFrame>
   );
 }
 
-function AuthFrame({ title, subtitle, footer, children }: { title: string; subtitle: string; footer: ReactNode; children: ReactNode }) {
+/** Enter the emailed code: confirms the address and signs in. */
+function ConfirmStep({ email, note, back }: { email: string; note?: string; back: { label: string; onClick: () => void } }) {
+  const [code, setCode] = useState("");
+  const [resent, setResent] = useState(false);
+  const confirm = useAction();
+  const resend = useAction();
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    confirm.run(async () => {
+      await post("/api/auth/confirm", { email, code });
+      window.location.assign(nextPath());
+    });
+  }
+
+  function sendNewCode() {
+    setResent(false);
+    resend.run(async () => {
+      await post("/api/auth/code", { email });
+      setResent(true);
+      setCode("");
+    });
+  }
+
+  return (
+    <AuthFrame
+      title="Check your email"
+      subtitle={
+        <>
+          We sent a 6-digit code to <span className="font-semibold text-ink">{email}</span>. It expires in 15 minutes.
+        </>
+      }
+      footer={
+        <button type="button" onClick={back.onClick} className="font-semibold text-brand-ink hover:underline">
+          {back.label}
+        </button>
+      }
+    >
+      {note && <p className="mb-4 rounded-lg bg-info-bg px-3.5 py-3 text-sm text-info-ink">{note}</p>}
+      <form onSubmit={submit} className="space-y-4">
+        <div>
+          <label htmlFor="code" className="text-sm font-semibold text-ink">
+            Code
+          </label>
+          <input
+            id="code"
+            required
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="\d{6}"
+            maxLength={6}
+            placeholder="000000"
+            value={code}
+            onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}
+            disabled={confirm.busy}
+            className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-center text-xl font-semibold tracking-[0.4em] tabular-nums outline-none placeholder:text-line-strong focus:border-brand focus:ring-2 focus:ring-brand/15 disabled:bg-sunk"
+          />
+        </div>
+        <ErrorNote error={confirm.error ?? resend.error} />
+        {resent && !resend.error && (
+          <p role="status" className="rounded-lg bg-good-bg px-3.5 py-2.5 text-sm text-good-ink">
+            A new code is on its way. Check your inbox, and the spam folder.
+          </p>
+        )}
+        <SubmitButton busy={confirm.busy} disabled={code.length !== 6} icon={<MailCheck className="size-4" aria-hidden />}>
+          {confirm.busy ? "Checking…" : "Confirm and sign in"}
+        </SubmitButton>
+        <p className="text-center text-sm text-ink-3">
+          No email?{" "}
+          <button
+            type="button"
+            onClick={sendNewCode}
+            disabled={resend.busy}
+            className="font-semibold text-brand-ink hover:underline disabled:cursor-not-allowed disabled:text-ink-3"
+          >
+            {resend.busy ? "Sending…" : "Send a new code"}
+          </button>
+        </p>
+      </form>
+    </AuthFrame>
+  );
+}
+
+function AuthFrame({ title, subtitle, footer, children }: { title: string; subtitle: ReactNode; footer: ReactNode; children: ReactNode }) {
   return (
     <main className="flex min-h-dvh items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">

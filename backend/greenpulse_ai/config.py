@@ -80,9 +80,8 @@ class Settings:
     api_host: str = "127.0.0.1"
     api_port: int = 8000
 
-    # Dashboard accounts. Anyone with the registration code can create one on the Register page; with no
-    # code set, registration is closed and only existing accounts can sign in.
-    registration_code: str | None = field(default=None, repr=False)
+    # Dashboard accounts, made on the Register page and confirmed with a code emailed to the address
+    # (so registering needs smtp_host).
     users_file: str = "data/users.json"  # accounts and sessions
 
     @classmethod
@@ -129,6 +128,5 @@ class Settings:
             dashboard_url=(_optional("DASHBOARD_URL") or "").rstrip("/") or None,
             api_host=_optional("API_HOST") or cls.api_host,
             api_port=int(_optional("API_PORT") or cls.api_port),
-            registration_code=_optional("REGISTRATION_CODE"),
             users_file=_optional("USERS_FILE") or cls.users_file,
         )

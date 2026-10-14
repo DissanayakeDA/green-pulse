@@ -3,6 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { loginUrl } from "./auth";
 
+/** An error answer from the bridge: its message, status and, for some, a `reason` the page can act on. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly reason?: string,
+  ) {
+    super(message);
+  }
+}
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     cache: "no-store",
@@ -14,9 +25,14 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
     // Signed out or the session ran out: sign in again, then come back here.
     if (response.status === 401 && !url.startsWith("/api/auth/")) window.location.assign(loginUrl());
     const detail = body?.detail;
-    if (typeof detail === "string") throw new Error(detail);
     // 429 without a detail comes from Nginx's limit on sign-in attempts.
-    throw new Error(response.status === 429 ? "Too many attempts. Wait a minute and try again." : `The server answered ${response.status}.`);
+    const message =
+      typeof detail === "string"
+        ? detail
+        : response.status === 429
+          ? "Too many attempts. Wait a minute and try again."
+          : `The server answered ${response.status}.`;
+    throw new ApiError(message, response.status, body?.reason);
   }
   return body as T;
 }

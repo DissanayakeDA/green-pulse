@@ -131,6 +131,21 @@ def code_email(code: str, minutes: int) -> Email:
     return subject, "\n\n".join(lines), _page(body)
 
 
+def account_code_email(name: str, code: str, minutes: int) -> Email:
+    subject = f"{code} is your GreenPulse sign-up code"
+    lines = [
+        f"Enter {code} on the GreenPulse dashboard to confirm your email address and finish creating your account.",
+        f"The code expires in {minutes} minutes.",
+        "If you didn't sign up, ignore this email. Without the code no account is made.",
+    ]
+    body = (
+        f"<p style='margin:0 0 16px'>Hi {escape(name)}, your GreenPulse sign-up code is</p>"
+        f"<p style='margin:0 0 16px;font-size:32px;font-weight:700;letter-spacing:6px'>{code}</p>"
+        + "".join(f"<p style='margin:0 0 12px'>{escape(line)}</p>" for line in lines)
+    )
+    return subject, "\n\n".join([f"Hi {name},", *lines]), _page(body)
+
+
 def sample_email(to: str, gets: list[str], dashboard_url: str | None = None) -> Email:
     subject = "GreenPulse test email"
     lines = [
