@@ -27,8 +27,10 @@ class Settings:
     offline: bool = False  # True = never call the LLM; agents use rule-based reasoning
 
     device_id: str = "greenpulse-01"
-    plant_profile: str = "pothos"
+    plant_profile: str = "pothos"  # plant for devices not given one on the dashboard
+    plants_file: str = "data/plants.json"  # plants added on the dashboard, and each device's plant
     location: str = "Colombo, LK"
+    timezone: str = "Asia/Colombo"  # local time for the chat answers
     topic_prefix: str = "greenpulse"
 
     # The ESP32 publishes often; the (paid) LLM pipeline only runs when something is worth re-analysing.
@@ -65,6 +67,19 @@ class Settings:
     email_imap_host: str = "imap.gmail.com"
     email_folder: str = "INBOX"
 
+    # Email alerts and daily summaries, sent over SMTP from email_address with the same app password, to
+    # the people added on the dashboard's Email alerts page. Not set = no email is sent.
+    smtp_host: str | None = None  # Zoho: smtppro.zoho.com; Gmail: smtp.gmail.com
+    smtp_port: int = 465  # 465 = SSL, 587 = STARTTLS
+    alerts_file: str = "data/alerts.json"  # who gets which emails
+    daily_summary_hour: int = 8  # local time (timezone)
+    dashboard_url: str | None = None  # linked from the emails, e.g. http://<server>:3000
+
+    # Dashboard API for the Next.js dashboard and the chat, served by the bridge. It listens on
+    # localhost only: the Next.js server proxies to it, so it is never reachable from outside.
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+
     @classmethod
     def from_env(cls) -> Settings:
         load_dotenv()
@@ -77,7 +92,9 @@ class Settings:
             offline=_flag("GREENPULSE_OFFLINE"),
             device_id=_optional("DEVICE_ID") or cls.device_id,
             plant_profile=_optional("PLANT_PROFILE") or cls.plant_profile,
+            plants_file=_optional("PLANTS_FILE") or cls.plants_file,
             location=_optional("LOCATION") or cls.location,
+            timezone=_optional("TIMEZONE") or cls.timezone,
             topic_prefix=_optional("MQTT_TOPIC_PREFIX") or cls.topic_prefix,
             analysis_interval_s=int(_optional("ANALYSIS_INTERVAL_S") or cls.analysis_interval_s),
             moisture_change_trigger=float(_optional("MOISTURE_CHANGE_TRIGGER") or cls.moisture_change_trigger),
@@ -100,4 +117,11 @@ class Settings:
             email_app_password=(_optional("EMAIL_APP_PASSWORD") or "").replace(" ", "") or None,
             email_imap_host=_optional("EMAIL_IMAP_HOST") or cls.email_imap_host,
             email_folder=_optional("EMAIL_FOLDER") or cls.email_folder,
+            smtp_host=_optional("SMTP_HOST"),
+            smtp_port=int(_optional("SMTP_PORT") or cls.smtp_port),
+            alerts_file=_optional("ALERTS_FILE") or cls.alerts_file,
+            daily_summary_hour=int(_optional("DAILY_SUMMARY_HOUR") or cls.daily_summary_hour),
+            dashboard_url=(_optional("DASHBOARD_URL") or "").rstrip("/") or None,
+            api_host=_optional("API_HOST") or cls.api_host,
+            api_port=int(_optional("API_PORT") or cls.api_port),
         )

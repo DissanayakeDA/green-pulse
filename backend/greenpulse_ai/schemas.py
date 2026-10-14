@@ -129,6 +129,21 @@ class CareAdvice(BaseModel):
     reasoning: str = Field(description="One sentence naming which agent findings decided the priority")
 
 
+class PlantCareProfile(BaseModel):
+    """The Plant Profile Agent's draft of a plant's needs, from the name the owner typed."""
+
+    recognised: bool = Field(description="true if this is a plant you know; false if the name is unclear or not a plant")
+    common_name: str = Field(description="The plant's usual English name, e.g. 'Aloe Vera'")
+    scientific_name: str = Field(description="Botanical name, e.g. 'Aloe vera'; empty string if not recognised")
+    soil_moisture_min: float = Field(description="Sensor % below which the plant needs water")
+    soil_moisture_max: float = Field(description="Sensor % above which the soil is too wet for it")
+    temperature_min: float = Field(description="Lowest ideal air temperature, deg C")
+    temperature_max: float = Field(description="Highest ideal air temperature, deg C")
+    humidity_min: float = Field(description="Lowest ideal relative humidity, %")
+    humidity_max: float = Field(description="Highest ideal relative humidity, %")
+    care_notes: str = Field(description="1-2 short sentences for a non-expert, mainly how to water it indoors")
+
+
 # --------------------------------------------------------------------------- final output
 
 

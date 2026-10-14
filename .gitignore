@@ -13,3 +13,6 @@ aws-endpoint/
 *.pem
 *.pem.crt
 *.pem.key
+
+# Plants added on the dashboard and each device's plant (PLANTS_FILE)
+backend/data/

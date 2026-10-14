@@ -135,13 +135,17 @@ class EnvironmentAgent:
         self.profile = profile
         self._chain = (ENVIRONMENT_PROMPT | llm.with_structured_output(EnvironmentAssessment)) if llm else None
 
-    def evaluate(self, reading: SensorReading, history: Sequence[SensorReading] = ()) -> EnvironmentReport:
-        """Rule-based assessment only. Cheap, so the service also uses it to decide when to re-run the LLMs."""
+    def evaluate(
+        self, reading: SensorReading, history: Sequence[SensorReading] = (), profile: PlantProfile | None = None
+    ) -> EnvironmentReport:
+        """Rule-based assessment only. Cheap, so the service also uses it to decide when to re-run the LLMs.
+        `profile` is the plant this device watches; without it, the agent's default plant."""
+        profile = profile or self.profile
         series = list(history) if history and history[-1] is reading else [*history, reading]
 
         metrics: dict[str, MetricStatus] = {}
         for key, spec in METRICS.items():
-            ideal = getattr(self.profile, spec.profile_range)
+            ideal = getattr(profile, spec.profile_range)
             value = getattr(reading, key)
             metrics[key] = MetricStatus(
                 value=value, unit=spec.unit, ideal_min=ideal[0], ideal_max=ideal[1], state=classify(value, ideal, spec)
@@ -188,7 +192,7 @@ class EnvironmentAgent:
 
         return EnvironmentReport(
             source="rules",
-            plant=self.profile.name,
+            plant=profile.name,
             condition=condition,
             summary=self._rule_summary(metrics, concerns),
             concerns=concerns,
@@ -198,18 +202,21 @@ class EnvironmentAgent:
             baseline_priority=baseline,
         )
 
-    def run(self, reading: SensorReading, history: Sequence[SensorReading] = ()) -> EnvironmentReport:
-        report = self.evaluate(reading, history)
+    def run(
+        self, reading: SensorReading, history: Sequence[SensorReading] = (), profile: PlantProfile | None = None
+    ) -> EnvironmentReport:
+        profile = profile or self.profile
+        report = self.evaluate(reading, history, profile)
         if self._chain is None:
             return report
         try:
-            assessment: EnvironmentAssessment = self._chain.invoke(self._prompt_inputs(reading, report))
+            assessment: EnvironmentAssessment = self._chain.invoke(self._prompt_inputs(reading, report, profile))
         except Exception:
             log.exception("Environment Agent LLM call failed; using the rule-based assessment")
             return report.model_copy(update={"source": "rules-fallback"})
         return report.model_copy(update={"source": "llm", **assessment.model_dump()})
 
-    def _prompt_inputs(self, reading: SensorReading, report: EnvironmentReport) -> dict[str, str]:
+    def _prompt_inputs(self, reading: SensorReading, report: EnvironmentReport, profile: PlantProfile) -> dict[str, str]:
         rows = []
         for key, status in report.metrics.items():
             spec = METRICS[key]
@@ -226,8 +233,8 @@ class EnvironmentAgent:
                 trend += f"; reaches the dry threshold in about {report.hours_until_dry:g} h"
 
         return {
-            "plant_name": self.profile.name,
-            "care_notes": self.profile.care_notes,
+            "plant_name": profile.name,
+            "care_notes": profile.care_notes,
             "timestamp": reading.timestamp.isoformat(timespec="seconds"),
             "metrics_table": "\n".join(rows),
             "trend": trend,

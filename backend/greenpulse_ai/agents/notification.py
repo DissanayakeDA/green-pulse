@@ -24,6 +24,7 @@ from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
 from typing import Protocol
 
+from ..mailer import HEADER
 from ..schemas import NotificationReport, Reminder
 
 log = logging.getLogger(__name__)
@@ -105,8 +106,8 @@ def _html_to_text(markup: str) -> str:
 
 
 def parse_email(raw: bytes) -> dict:
-    """One RFC 822 message -> {from, subject, body, received}. The body is the plain-text part, or the
-    HTML part stripped of tags."""
+    """One RFC 822 message -> {from, subject, body, received, from_greenpulse}. The body is the plain-text
+    part, or the HTML part stripped of tags. from_greenpulse marks GreenPulse's own alert emails."""
     message: EmailMessage = email.message_from_bytes(raw, policy=email.policy.default)
     body = ""
     part = message.get_body(preferencelist=("plain", "html"))
@@ -131,6 +132,7 @@ def parse_email(raw: bytes) -> dict:
         "subject": str(message["subject"] or "(no subject)"),
         "body": body,
         "received": received,
+        "from_greenpulse": message[HEADER] is not None,
     }
 
 
@@ -215,8 +217,12 @@ class ImapNotificationAgent:
             if not isinstance(part, tuple):
                 continue  # the b")" that closes each FETCH response
             try:
-                messages.append(parse_email(part[1]))
+                message = parse_email(part[1])
             except Exception:
                 log.warning("Skipping an email that could not be parsed", exc_info=True)
+                continue
+            # GreenPulse's own alerts ("Water the plant now") would otherwise come back as reminders.
+            if not message["from_greenpulse"]:
+                messages.append(message)
         messages.reverse()  # IMAP returns oldest first
         return messages

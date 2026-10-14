@@ -1,4 +1,5 @@
 import imaplib
+import smtplib
 import sys
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -113,6 +114,33 @@ class FakeImap:
 
     def connections(self) -> int:
         return sum(1 for call in self.calls if call[0] == "connect")
+
+
+class FakeSmtp:
+    """Stands in for smtplib.SMTP_SSL (the mailer's "connect" function): records every message sent.
+    fail="login" makes the login fail as with a wrong app password."""
+
+    def __init__(self, fail: str | None = None):
+        self.fail = fail
+        self.sent: list[EmailMessage] = []
+        self.connections: list[tuple[str, int]] = []
+
+    def __call__(self, host, port, timeout):
+        self.connections.append((host, port))
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def login(self, username, password):
+        if self.fail == "login":
+            raise smtplib.SMTPAuthenticationError(535, b"Authentication Failed")
+
+    def send_message(self, message):
+        self.sent.append(message)
 
 
 @pytest.fixture

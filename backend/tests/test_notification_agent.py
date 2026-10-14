@@ -1,12 +1,15 @@
 import dataclasses
 import imaplib
 from datetime import date
+from email.message import EmailMessage
+from email.utils import format_datetime
 
 import pytest
 
 from greenpulse_ai import Settings, live_context_agents
 from greenpulse_ai.agents import ImapNotificationAgent, NoMailboxAgent, OpenMeteoWeatherAgent
 from greenpulse_ai.agents.notification import find_reminders, parse_email
+from greenpulse_ai.mailer import HEADER
 
 from conftest import T0, FakeImap, make_email
 
@@ -111,6 +114,19 @@ def test_newest_messages_first():
     )
     titles = [r.title for r in agent.run().reminders]
     assert titles == ["Water the plant (newer)", "Water the plant (older)"]
+
+
+def test_greenpulse_own_alerts_are_not_read_back_as_reminders():
+    alert = EmailMessage()
+    alert["From"] = "GreenPulse <plant.owner@gmail.com>"
+    alert["Subject"] = "Act now: Water the plant now - Pothos (Money Plant)"
+    alert["Date"] = format_datetime(T0)
+    alert[HEADER] = "alert"
+    alert.set_content("Water the plant within the next 2 h.")
+    agent, _, _ = mailbox(make_email("Reminder: fertilise the money plant", "This weekend."), bytes(alert))
+
+    report = agent.run()
+    assert [r.title for r in report.reminders] == ["Reminder: fertilise the money plant"]
 
 
 def test_empty_mailbox():

@@ -2,11 +2,16 @@
 
     python -m greenpulse_ai.bridge              # broker and LLM settings from .env
     python -m greenpulse_ai.bridge --offline    # rule-based agents only, no LLM calls
+    python -m greenpulse_ai.bridge --demo       # simulated ESP32, no broker needed (see demo.py)
 
 Subscribes to  <prefix>/+/sensors      readings from every ESP32
                <prefix>/+/pump/state   the ESP32 reporting pump on / off / rejected (auto and manual runs)
-               <prefix>/+/pump/auto    the Node-RED auto-watering switch (retained)
-Publishes      <prefix>/<id>/ai/input, ai/care, priority (see mqtt_payloads) and <prefix>/<id>/pump/command
+               <prefix>/+/pump/auto    the auto-watering switch on either dashboard (retained)
+Publishes      <prefix>/<id>/ai/input, ai/care, priority (see mqtt_payloads) and <prefix>/<id>/pump/command,
+               plus <prefix>/<id>/pump/auto when the switch is flipped on the Next.js dashboard
+
+It also serves the dashboard API (api.py) for the Next.js dashboard and its chat, on API_HOST:API_PORT,
+and emails alerts and daily summaries to the addresses added on the dashboard (alerts.py, SMTP_HOST).
 """
 
 from __future__ import annotations
@@ -23,10 +28,18 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
+from .agents.chat import ChatAgent
+from .agents.profile import PlantProfileAgent
+from .alerts import AlertCenter
+from .api import create_app, serve_in_background
 from .config import Settings
+from .demo import SimulatedEsp32
+from .device_state import DeviceStore
 from .llm import create_chat_model
+from .mailer import Mailer
 from .mqtt_payloads import Topics, build_messages, parse_sensor_payload
 from .orchestrator import PlantCareService, build_service, describe_context, live_context_agents
+from .plant_library import PlantLibrary
 from .plant_profiles import PROFILES, get_profile
 from .schemas import CareResult, SensorReading
 from .watering import WateringPolicy
@@ -46,12 +59,17 @@ class Bridge:
         policy: WateringPolicy,
         client: mqtt.Client | None = None,
         clock: Callable[[], datetime] = _utcnow,
+        store: DeviceStore | None = None,
+        alerts: AlertCenter | None = None,
     ):
         self.settings = settings
         self.service = service
         self.policy = policy
         self.topics = Topics(settings.topic_prefix)
         self.clock = clock
+        # What the dashboard API and the Chat Agent read: recent readings, the last result, pump events.
+        self.store = store or DeviceStore(get_profile(settings.plant_profile), policy.is_enabled, clock)
+        self.alerts = alerts
         self.client = client or create_client(settings)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -103,6 +121,7 @@ class Bridge:
                     _fmt(reading.temperature, "°C"),
                     _fmt(reading.humidity, "% RH"),
                 )
+                self.store.record_reading(reading)
                 try:
                     self._readings.put_nowait(reading)
                 except queue.Full:
@@ -113,14 +132,34 @@ class Bridge:
                     raise ValueError("expected a JSON object")
                 log.info("%s  pump %s", device_id, json.dumps(state))
                 self.policy.record_pump_state(device_id, state, self.clock())
+                self.store.record_pump_state(device_id, state, self.clock())
             elif kind == "pump/auto":
                 enabled = _parse_switch(payload)
-                if enabled and not self.policy.is_enabled(device_id):
-                    self._analyse_next.add(device_id)
-                self.policy.set_enabled(device_id, enabled)
+                self._apply_auto_watering(device_id, enabled)
                 log.info("%s  auto-watering %s", device_id, "ON" if enabled else "OFF")
         except ValueError as exc:  # bad JSON or a payload that fails validation
             log.warning("Ignoring bad payload on %s: %s", topic, exc)
+
+    def _apply_auto_watering(self, device_id: str, enabled: bool) -> None:
+        if enabled and not self.policy.is_enabled(device_id):
+            self._analyse_next.add(device_id)
+        self.policy.set_enabled(device_id, enabled)
+
+    # ------------------------------------------------------------------ dashboard controls (api.PumpControls)
+
+    def water_now(self, device_id: str) -> float:
+        """The Next.js dashboard's "Water now" button: one manual pulse, the same command Node-RED sends.
+        The ESP32 applies its own limits and reports on pump/state, which also starts the auto cooldown."""
+        command = {"action": "on", "duration_s": self.policy.pulse_s, "source": "manual", "reason": "Dashboard button"}
+        self._publish(self.topics.pump_command(device_id), command, retain=False)
+        return self.policy.pulse_s
+
+    def set_auto_watering(self, device_id: str, enabled: bool) -> None:
+        """The Next.js dashboard's auto-watering switch. Published retained, like the Node-RED switch, so
+        both dashboards show the same state and a restarted bridge picks it up again."""
+        self._publish(self.topics.pump_auto(device_id), enabled, retain=True)
+        self._apply_auto_watering(device_id, enabled)
+        log.info("%s  auto-watering %s (Next.js dashboard)", device_id, "ON" if enabled else "OFF")
 
     # ------------------------------------------------------------------ analysis
 
@@ -149,6 +188,7 @@ class Bridge:
             return None
 
         decision = self.policy.decide(result, self.clock())
+        self.store.record_result(result, decision)
         retained = self.topics.retained(result.device_id)
         for topic, payload in build_messages(result, self.topics, decision):
             self._publish(topic, payload, retain=topic in retained)
@@ -166,9 +206,11 @@ class Bridge:
             result.doctor_source,
             result.model or "rules",
         )
+        if self.alerts:
+            self.alerts.on_result(result, decision)
         return result
 
-    def _publish(self, topic: str, payload: dict, retain: bool) -> None:
+    def _publish(self, topic: str, payload: dict | bool, retain: bool) -> None:
         self.client.publish(topic, json.dumps(payload, ensure_ascii=False), qos=1, retain=retain)
 
 
@@ -203,6 +245,16 @@ def _parse_switch(payload: bytes) -> bool:
     return bool(value)
 
 
+def describe_alerts(alerts: AlertCenter) -> str:
+    if not alerts.mailer:
+        return "Email alerts: off (set SMTP_HOST in .env to send them)"
+    confirmed = sum(1 for r in alerts.overview()["recipients"] if r["verified"])
+    return (
+        f"Email alerts: from {alerts.mailer.username} via {alerts.mailer.host}:{alerts.mailer.port} to "
+        f"{confirmed} confirmed address{'' if confirmed == 1 else 'es'}; daily summary at {alerts.daily_hour:02d}:00"
+    )
+
+
 def _fmt(value: float | None, unit: str) -> str:
     return "--" if value is None else f"{value:g}{unit}"
 
@@ -215,7 +267,18 @@ def main(argv: list[str] | None = None) -> None:
         description="Connect the Multi-Agent Plant Doctor to the MQTT broker and process live ESP32 readings.",
     )
     parser.add_argument("--offline", action="store_true", help="rule-based agents only; no LLM calls")
-    parser.add_argument("--plant", choices=PROFILES, help="plant profile (default: PLANT_PROFILE or pothos)")
+    parser.add_argument(
+        "--plant", choices=PROFILES, help="plant for devices not given one on the dashboard (default: PLANT_PROFILE or pothos)"
+    )
+    parser.add_argument(
+        "--demo",
+        nargs="?",
+        const=40.0,
+        type=float,
+        metavar="SOIL",
+        help="simulated ESP32 instead of the MQTT broker, starting at SOIL %% moisture (default 40; try 25 for dry soil)",
+    )
+    parser.add_argument("--no-api", action="store_true", help="don't serve the dashboard API")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     args = parser.parse_args(argv)
 
@@ -235,16 +298,55 @@ def main(argv: list[str] | None = None) -> None:
 
     llm = create_chat_model(settings)
     weather, notifications = live_context_agents(settings)
-    service = build_service(settings, llm, weather, notifications)
-    bridge = Bridge(settings, service, WateringPolicy.from_settings(settings))
-    tls = " (TLS)" if uses_tls(settings) else ""
+    # Each device's plant: chosen on the dashboard, else PLANT_PROFILE. Every agent reads it from here.
+    plants = PlantLibrary(settings.plants_file, settings.plant_profile)
+    service = build_service(settings, llm, weather, notifications, profile_for=plants.profile_for)
+    policy = WateringPolicy.from_settings(settings)
+    store = DeviceStore(get_profile(settings.plant_profile), policy.is_enabled, profile_for=plants.profile_for)
+    client = None
+    if args.demo is not None:
+        client = SimulatedEsp32(settings.device_id, settings.topic_prefix, soil=args.demo)
+        service.preload(client.backfill(store))
+    alerts = AlertCenter(
+        Mailer.from_settings(settings),
+        store,
+        settings.alerts_file,
+        settings.timezone,
+        settings.daily_summary_hour,
+        settings.dashboard_url,
+    )
+    alerts.start()
+    bridge = Bridge(settings, service, policy, client=client, store=store, alerts=alerts)
+
+    if args.demo is not None:
+        broker = f"simulated ESP32 {settings.device_id} (demo, no broker)"
+    else:
+        broker = f"{settings.mqtt_host}:{settings.mqtt_port}{' (TLS)' if uses_tls(settings) else ''}"
+    if args.no_api:
+        api = "dashboard API off"
+    else:
+        chat = ChatAgent(store, llm, settings.llm_model, settings.location, settings.timezone)
+        info = {
+            "demo": args.demo is not None,
+            "location": settings.location,
+            "watering": {
+                "pulse_s": settings.water_pulse_s,
+                "cooldown_s": settings.water_cooldown_s,
+                "max_per_day": settings.water_max_per_day,
+            },
+        }
+        profile_agent = PlantProfileAgent(llm, settings.llm_model, settings.location)
+        app = create_app(store, chat, bridge, settings.device_id, info, plants, profile_agent, alerts)
+        serve_in_background(app, settings.api_host, settings.api_port)
+        api = f"dashboard API on http://{settings.api_host}:{settings.api_port}"
     print(
-        f"GreenPulse bridge | broker {settings.mqtt_host}:{settings.mqtt_port}{tls} | "
-        f"plant: {get_profile(settings.plant_profile).name} | "
+        f"GreenPulse bridge | broker {broker} | "
+        f"plant: {plants.profile_for(settings.device_id).name} | "
         f"mode: {'LLM ' + settings.llm_model if llm else 'rules only (offline)'} | "
         f"auto-watering: {'on' if settings.auto_watering else 'off'} until the dashboard switch says otherwise\n"
         f"{describe_context(settings)}\n"
-        f"Listening on {bridge.topics.sensors('+')}. Ctrl+C to stop.\n",
+        f"{describe_alerts(alerts)}\n"
+        f"Listening on {bridge.topics.sensors('+')}; {api}. Ctrl+C to stop.\n",
         flush=True,
     )
     try:

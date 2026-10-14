@@ -1,0 +1,26 @@
+# systemd service for the GreenPulse Next.js dashboard on EC2. It talks to the bridge's dashboard API
+# on 127.0.0.1:8000, so greenpulse-bridge must run on the same server. See docs/deployment.md.
+#
+#   cd ~/green-pulse/dashboard && npm ci && npm run build
+#   sudo cp ~/green-pulse/deploy/greenpulse-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now greenpulse-dashboard
+#   journalctl -u greenpulse-dashboard -f      # live log
+
+[Unit]
+Description=GreenPulse dashboard (Next.js)
+Wants=network-online.target greenpulse-bridge.service
+After=network-online.target greenpulse-bridge.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/green-pulse/dashboard
+# `which npm` shows the path if Node.js was installed somewhere else.
+ExecStart=/usr/bin/npm run start -- --port 3000
+Environment=NODE_ENV=production
+Environment=GREENPULSE_API_URL=http://127.0.0.1:8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
